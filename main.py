@@ -4,6 +4,7 @@ import yt_dlp
 import asyncio
 import os
 import re
+from aiohttp import web
 from config import TOKEN, DEFAULT_VOLUME
 
 intents = discord.Intents.default()
@@ -109,6 +110,19 @@ async def play_next_message(interaction_or_ctx, guild_id):
             fut.result()
         except:
             pass
+
+# Web server for UptimeRobot and Fly.io health checks
+async def handle_ping(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.add_routes([web.get('/', handle_ping)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    print("🌐 Web server started on port 8080")
 
 @bot.event
 async def on_ready():
@@ -359,7 +373,14 @@ async def hmb(interaction: discord.Interaction):
     view.message = message
 
 
+async def main():
+    await start_web_server()
+    await bot.start(TOKEN)
+
 if __name__ == "__main__":
     if not TOKEN:
         exit(1)
-    bot.run(TOKEN)
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
