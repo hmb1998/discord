@@ -16,7 +16,7 @@ A Discord music bot that plays audio from YouTube and supports **both slash comm
 
 ## Commands
 
-The project contains **100 slash commands** (Discord's top-level limit) and **101 commands with `!`**. The extra `!uptime_seconds` command is prefix-only.
+The project contains **100 slash commands** (Discord's top-level limit). All 100 also have `!` prefix aliases, plus the extra `!uptime_seconds` prefix-only command.
 
 Examples:
 
@@ -77,4 +77,4 @@ The included `Dockerfile` installs FFmpeg. The included `fly.toml` exposes port 
 
 
 ### Prefix command fix
-All 101 `!` prefix aliases are registered separately after the slash callbacks are defined. This avoids the discord.py `command function must be a coroutine function` startup error caused by stacking `@bot.command` on `@bot.tree.command`.
+The 100 slash commands are kept within Discord's top-level slash-command limit. `!` commands call the same slash callbacks directly, and `!uptime_seconds` remains prefix-only. This avoids duplicate registration and the `command function must be a coroutine function` / 100-command-limit startup errors.

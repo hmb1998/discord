@@ -18,7 +18,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Discord Music Bot is online — 101 slash commands + 101 !prefix commands."
+    return "Discord Music Bot is online — 100 slash commands + ! prefix aliases."
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -136,11 +136,22 @@ async def dispatch_prefix_command(message):
         return False
 
     name = parts.pop(0).lower()
-    command = bot.get_command(name)
-    if command is None:
+    # Use the slash-command callback directly for prefix aliases.
+    # This avoids registering a second copy of every command with discord.py.
+    if name == 'uptime_seconds':
+        await message.channel.send(
+            f'⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds'
+        )
+        return True
+
+    slash_command = next(
+        (cmd for cmd in bot.tree.get_commands() if cmd.name == name),
+        None
+    )
+    if slash_command is None:
         return False
 
-    callback = command.callback
+    callback = slash_command.callback
     import inspect
     ctx = await bot.get_context(message)
     params = list(inspect.signature(callback).parameters.values())[1:]  # skip interaction
@@ -332,7 +343,7 @@ async def play_next(guild_id):
 
 @bot.event
 async def on_ready():
-    activity = discord.Activity(type=discord.ActivityType.listening, name="!play | /play | 100+ Commands")
+    activity = discord.Activity(type=discord.ActivityType.listening, name="!play | /play | 100 Slash Commands + ! Prefix Commands")
     await bot.change_presence(activity=activity)
     print(f'✅ Bot is ready! Logged in as {bot.user}')
 
@@ -1775,68 +1786,6 @@ async def volume_reset(interaction: discord.Interaction):
 
 async def uptime_seconds(interaction: discord.Interaction):
     await interaction.response.send_message(f"⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds")
-
-# ---------------------------------------------------------------------------
-# Prefix aliases
-# Discord allows at most 100 top-level slash commands. This bot has 101
-# commands, so uptime_seconds is intentionally prefix-only; all 101 remain
-# available with the ! prefix.
-#
-# We use a small adapter so the same callbacks can be called from both slash
-# interactions and prefix-command contexts without stacking decorators.
-# ---------------------------------------------------------------------------
-class _PrefixResponse:
-    def __init__(self, ctx):
-        self.ctx = ctx
-
-    async def send_message(self, content=None, **kwargs):
-        kwargs.pop('ephemeral', None)
-        return await self.ctx.send(content, **kwargs)
-
-    async def defer(self, **kwargs):
-        return None
-
-class _PrefixFollowup:
-    def __init__(self, ctx):
-        self.ctx = ctx
-
-    async def send(self, content=None, **kwargs):
-        kwargs.pop('ephemeral', None)
-        return await self.ctx.send(content, **kwargs)
-
-class _PrefixInteraction:
-    def __init__(self, ctx):
-        self._ctx = ctx
-        self.user = ctx.author
-        self.guild = ctx.guild
-        self.guild_id = ctx.guild.id if ctx.guild else None
-        self.channel = ctx.channel
-        self.response = _PrefixResponse(ctx)
-        self.followup = _PrefixFollowup(ctx)
-
-def _register_prefix_aliases():
-    for slash in bot.tree.get_commands():
-        if bot.get_command(slash.name) is not None:
-            continue
-        callback = slash.callback
-
-        async def prefix_callback(ctx, *args, _callback=callback):
-            interaction = _PrefixInteraction(ctx)
-            return await _callback(interaction, *args)
-
-        bot.add_command(commands.Command(
-            prefix_callback, name=slash.name, help=slash.description
-        ))
-
-    async def uptime_prefix(ctx):
-        await ctx.send(f"⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds")
-
-    if bot.get_command('uptime_seconds') is None:
-        bot.add_command(commands.Command(
-            uptime_prefix, name='uptime_seconds', help='⏱ Show uptime in seconds'
-        ))
-
-_register_prefix_aliases()
 
 if __name__ == '__main__':
     # Fly.io health endpoint.  Flask runs in a background thread while the
