@@ -1,28 +1,29 @@
 import discord
-from discord import app_commands
+from discord.ext import commands
 import yt_dlp
 import asyncio
 import os
 import re
-from aiohttp import web
-from config import TOKEN, DEFAULT_VOLUME
+import requests
+import zipfile
+import io
+from config import TOKEN, GITHUB_FILES_URL, BOT_PREFIX, DEFAULT_VOLUME
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 
-class MusicBot(discord.Client):
+class MusicBot(commands.Bot):
     def __init__(self):
-        super().__init__(intents=intents)
-        self.tree = app_commands.CommandTree(self)
+        super().__init__(command_prefix='!', intents=intents)
         self.queues = {}
         self.custom_voice_clients = {}
 
     async def setup_hook(self):
-        await self.tree.sync()
-        print("✅ Bot is ready with Slash commands!")
+        print("✅ Bot is ready with Prefix commands!")
 
 bot = MusicBot()
+bot.remove_command('help')
 
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin',
@@ -61,7 +62,8 @@ def search_youtube(query):
         except Exception as e:
             return {'error': str(e)[:200]}
 
-async def play_next_message(interaction_or_ctx, guild_id):
+async def play_next_message(ctx):
+    guild_id = ctx.guild.id
     if guild_id not in bot.queues or len(bot.queues[guild_id]) == 0:
         await asyncio.sleep(5)
         if guild_id in bot.queues and len(bot.queues[guild_id]) == 0:
@@ -78,7 +80,7 @@ async def play_next_message(interaction_or_ctx, guild_id):
     def after_playing(error):
         if error:
             print(f"Playback error: {error}")
-        coro = play_next_message(interaction_or_ctx, guild_id)
+        coro = play_next_message(ctx)
         fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
         try:
             fut.result()
@@ -96,37 +98,21 @@ async def play_next_message(interaction_or_ctx, guild_id):
         vc.source.volume = DEFAULT_VOLUME
 
         try:
-            if isinstance(interaction_or_ctx, discord.Interaction):
-                await interaction_or_ctx.channel.send(f"🎵 **Now Playing:** {song['title']}")
-            else:
-                await interaction_or_ctx.send(f"🎵 **Now Playing:** {song['title']}")
+            await ctx.send(f"🎵 **Now Playing:** {song['title']}")
         except:
             pass
     except Exception as e:
         print(f"Error in playback: {e}")
-        coro = play_next_message(interaction_or_ctx, guild_id)
+        coro = play_next_message(ctx)
         fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
         try:
             fut.result()
         except:
             pass
 
-# Web server for UptimeRobot and Fly.io health checks
-async def handle_ping(request):
-    return web.Response(text="Bot is running!")
-
-async def start_web_server():
-    app = web.Application()
-    app.add_routes([web.get('/', handle_ping)])
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
-    print("🌐 Web server started on port 8080")
-
 @bot.event
 async def on_ready():
-    activity = discord.Activity(type=discord.ActivityType.listening, name="/hmb")
+    activity = discord.Activity(type=discord.ActivityType.listening, name="!hmb")
     await bot.change_presence(activity=activity)
     print(f'✅ Bot is ready! Logged in as {bot.user}')
 
@@ -141,16 +127,16 @@ class SongSearchModal(discord.ui.Modal, title="🔍 Search or Play Song"):
         max_length=300
     )
 
-    def __init__(self, interaction, view_instance):
+    def __init__(self, ctx, view_instance):
         super().__init__()
-        self.interaction = interaction
+        self.ctx = ctx
         self.view_instance = view_instance
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         query = self.song_query.value
-        guild_id = interaction.guild.id
-        voice_channel = interaction.user.voice.channel if interaction.user.voice else None
+        guild_id = self.ctx.guild.id
+        voice_channel = self.ctx.author.voice.channel if self.ctx.author.voice else None
 
         if not voice_channel:
             await interaction.followup.send("❌ You must be in a voice channel!", ephemeral=True)
@@ -178,7 +164,7 @@ class SongSearchModal(discord.ui.Modal, title="🔍 Search or Play Song"):
 
         if not vc.is_playing():
             await interaction.followup.send(f"✅ **Added & Playing:** {song['title']}", ephemeral=True)
-            await play_next_message(interaction, guild_id)
+            await play_next_message(self.ctx)
         else:
             position = len(bot.queues[guild_id])
             await interaction.followup.send(f"✅ **Added to queue:** {song['title']} (Position #{position})", ephemeral=True)
@@ -191,10 +177,10 @@ class SongSearchModal(discord.ui.Modal, title="🔍 Search or Play Song"):
 # CONTROL PANEL VIEW
 # ============================================================
 class ControlView(discord.ui.View):
-    def __init__(self, interaction):
+    def __init__(self, ctx):
         super().__init__(timeout=300)
-        self.interaction = interaction
-        self.guild_id = interaction.guild.id
+        self.ctx = ctx
+        self.guild_id = ctx.guild.id
         self.message = None
 
     async def update_embed(self):
@@ -220,21 +206,12 @@ class ControlView(discord.ui.View):
         embed.set_footer(text=f"📋 Queue: {queue_len} songs • 🎵 Music Bot")
         return embed
 
-    async def on_timeout(self):
-        for child in self.children:
-            child.disabled = True
-        try:
-            if self.message:
-                await self.message.edit(view=self)
-        except:
-            pass
-
     @discord.ui.button(label="🔍 Search & Play", style=discord.ButtonStyle.primary, row=0)
     async def search_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.voice:
             await interaction.response.send_message("❌ You must be in a voice channel first!", ephemeral=True)
             return
-        await interaction.response.send_modal(SongSearchModal(interaction, self))
+        await interaction.response.send_modal(SongSearchModal(self.ctx, self))
 
     @discord.ui.button(label="⏸ Pause/Resume", style=discord.ButtonStyle.secondary, row=0)
     async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -335,52 +312,63 @@ class ControlView(discord.ui.View):
         await interaction.response.send_message(msg, ephemeral=True)
 
 
-@bot.tree.command(name='hmb', description='Open the interactive music control panel')
-async def hmb(interaction: discord.Interaction):
-    if not interaction.user.voice:
-        await interaction.response.send_message("❌ You must be in a voice channel first!", ephemeral=True)
+@bot.command(name='hmb', description='Open the interactive music control panel')
+async def hmb(ctx):
+    if not ctx.author.voice:
+        await ctx.send("❌ You must be in a voice channel first!")
         return
 
-    voice_channel = interaction.user.voice.channel
-    guild_id = interaction.guild.id
+    voice_channel = ctx.author.voice.channel
+    guild_id = ctx.guild.id
 
     if guild_id not in bot.custom_voice_clients or not bot.custom_voice_clients[guild_id].is_connected():
         try:
             vc = await voice_channel.connect()
             bot.custom_voice_clients[guild_id] = vc
         except Exception as e:
-            await interaction.response.send_message(f"❌ Could not connect: {str(e)[:100]}", ephemeral=True)
+            await ctx.send(f"❌ Could not connect: {str(e)[:100]}")
             return
     else:
         vc = bot.custom_voice_clients[guild_id]
         if vc.channel != voice_channel:
             await vc.move_to(voice_channel)
 
-    view = ControlView(interaction)
+    view = ControlView(ctx)
     volume = int(vc.source.volume * 100) if vc.source and hasattr(vc.source, 'volume') else DEFAULT_VOLUME
 
     embed = discord.Embed(
         title="🎛 **Music Control Panel**",
-        description=f"**Guild:** `{interaction.guild.name}`\n"
+        description=f"**Guild:** `{ctx.guild.name}`\n"
                     f"**Voice Channel:** `{vc.channel.name}`\n"
                     f"**Volume:** `{volume}%`",
         color=discord.Color.blurple()
     )
     embed.set_footer(text=f"📋 Queue: {len(bot.queues.get(guild_id, []))} songs")
 
-    await interaction.response.send_message(embed=embed, view=view)
-    message = await interaction.original_response()
+    message = await ctx.send(embed=embed, view=view)
     view.message = message
 
+    def disable_buttons():
+        for child in view.children:
+            child.disabled = True
 
-async def main():
-    await start_web_server()
-    await bot.start(TOKEN)
+    view.on_timeout = disable_buttons
+
+
+@bot.command(name='help', description='Show available commands')
+async def help_command(ctx):
+    embed = discord.Embed(
+        title="🤖 **Music Bot Commands**",
+        description="Here are all available commands using the `!` prefix:",
+        color=discord.Color.blurple()
+    )
+    embed.add_field(name="`!hmb`", value="Opens the interactive control panel with buttons & search box.", inline=False)
+    embed.add_field(name="`!help`", value="Shows this help menu.", inline=False)
+    embed.set_footer(text="🎵 Music Bot • All commands use !")
+    await ctx.send(embed=embed)
+
 
 if __name__ == "__main__":
     if not TOKEN:
         exit(1)
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+    bot.run(TOKEN)
