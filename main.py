@@ -4,8 +4,7 @@ import yt_dlp
 import asyncio
 import os
 import re
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from aiohttp import web
 from config import TOKEN, DEFAULT_VOLUME
 
 intents = discord.Intents.default()
@@ -109,17 +108,17 @@ async def play_next_message(ctx):
         except:
             pass
 
-class SimpleHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-    def log_message(self, format, *args):
-        pass
+async def handle_ping(request):
+    return web.Response(text="OK")
 
-def run_http_server():
-    server = HTTPServer(('0.0.0.0', 8080), SimpleHandler)
-    server.serve_forever()
+async def start_web_server():
+    app = web.Application()
+    app.add_routes([web.get('/', handle_ping), web.get('/healthz', handle_ping)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    print("🌐 Web server successfully started and listening on port 8080")
 
 @bot.event
 async def on_ready():
@@ -342,14 +341,15 @@ async def hmb(ctx):
             child.disabled = True
     view.on_timeout = disable_buttons
 
+async def main():
+    server_task = asyncio.create_task(start_web_server())
+    bot_task = asyncio.create_task(bot.start(TOKEN))
+    await asyncio.gather(server_task, bot_task)
+
 if __name__ == "__main__":
     if not TOKEN:
         exit(1)
-    
-    server_thread = threading.Thread(target=run_http_server, daemon=True)
-    server_thread.start()
-
     try:
-        bot.run(TOKEN)
+        asyncio.run(main())
     except KeyboardInterrupt:
         pass
