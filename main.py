@@ -4,6 +4,7 @@ import yt_dlp
 import asyncio
 import os
 import re
+from aiohttp import web
 from config import TOKEN, DEFAULT_VOLUME
 
 intents = discord.Intents.default()
@@ -107,6 +108,19 @@ async def play_next_message(ctx):
         except:
             pass
 
+# Dummy web server to satisfy Fly.io health checks immediately
+async def handle_ping(request):
+    return web.Response(text="OK")
+
+async def start_web_server():
+    app = web.Application()
+    app.add_routes([web.get('/', handle_ping), web.get('/healthz', handle_ping)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    print("🌐 Web server started on port 8080")
+
 @bot.event
 async def on_ready():
     activity = discord.Activity(type=discord.ActivityType.listening, name="!hmb")
@@ -114,7 +128,7 @@ async def on_ready():
     print(f'✅ Bot is ready! Logged in as {bot.user}')
 
 # ============================================================
-# SEARCH MODAL
+# SEARCH MODAL & VIEWS
 # ============================================================
 class SongSearchModal(discord.ui.Modal, title="🔍 Search or Play Song"):
     song_query = discord.ui.TextInput(
@@ -169,10 +183,6 @@ class SongSearchModal(discord.ui.Modal, title="🔍 Search or Play Song"):
         embed = await self.view_instance.update_embed()
         await self.view_instance.message.edit(embed=embed)
 
-
-# ============================================================
-# CONTROL PANEL VIEW
-# ============================================================
 class ControlView(discord.ui.View):
     def __init__(self, ctx):
         super().__init__(timeout=300)
@@ -182,23 +192,17 @@ class ControlView(discord.ui.View):
 
     async def update_embed(self):
         guild_id = self.guild_id
-        embed = discord.Embed(
-            title="🎛 **Music Control Panel**",
-            color=discord.Color.blurple()
-        )
-
+        embed = discord.Embed(title="🎛 **Music Control Panel**", color=discord.Color.blurple())
         if guild_id in bot.custom_voice_clients and bot.custom_voice_clients[guild_id].is_connected():
             vc = bot.custom_voice_clients[guild_id]
             status = "🟢 Playing" if vc.is_playing() else "🟡 Paused" if vc.is_paused() else "⚫ Stopped"
             channel_name = vc.channel.name if vc.channel else "Unknown"
             volume = int(vc.source.volume * 100) if vc.source and hasattr(vc.source, 'volume') else DEFAULT_VOLUME
-
             embed.add_field(name="📡 Connection", value=f"`{channel_name}`", inline=True)
             embed.add_field(name="🔊 Volume", value=f"`{volume}%`", inline=True)
             embed.add_field(name="📊 Status", value=status, inline=True)
         else:
             embed.add_field(name="📡 Status", value="❌ **Not Connected**", inline=False)
-
         queue_len = len(bot.queues.get(guild_id, []))
         embed.set_footer(text=f"📋 Queue: {queue_len} songs • 🎵 Music Bot")
         return embed
@@ -216,7 +220,6 @@ class ControlView(discord.ui.View):
         if guild_id not in bot.custom_voice_clients:
             await interaction.response.send_message("❌ Not connected!", ephemeral=True)
             return
-
         vc = bot.custom_voice_clients[guild_id]
         if vc.is_playing():
             vc.pause()
@@ -227,7 +230,6 @@ class ControlView(discord.ui.View):
         else:
             await interaction.response.send_message("❌ Nothing to pause/resume", ephemeral=True)
             return
-
         embed = await self.update_embed()
         await self.message.edit(embed=embed)
 
@@ -249,7 +251,6 @@ class ControlView(discord.ui.View):
             await bot.custom_voice_clients[guild_id].disconnect()
             bot.custom_voice_clients.pop(guild_id, None)
             bot.queues.pop(guild_id, None)
-
             await interaction.response.send_message("👋 Disconnected!", ephemeral=True)
             try:
                 await self.message.delete()
@@ -269,7 +270,6 @@ class ControlView(discord.ui.View):
         if not vc.source or not hasattr(vc.source, 'volume'):
             await interaction.response.send_message("❌ No audio source", ephemeral=True)
             return
-
         new_vol = min(vc.source.volume + 0.10, 1.0)
         vc.source.volume = new_vol
         embed = await self.update_embed()
@@ -286,7 +286,6 @@ class ControlView(discord.ui.View):
         if not vc.source or not hasattr(vc.source, 'volume'):
             await interaction.response.send_message("❌ No audio source", ephemeral=True)
             return
-
         new_vol = max(vc.source.volume - 0.10, 0.0)
         vc.source.volume = new_vol
         embed = await self.update_embed()
@@ -299,28 +298,23 @@ class ControlView(discord.ui.View):
         if guild_id not in bot.queues or len(bot.queues[guild_id]) == 0:
             await interaction.response.send_message("📭 Queue is empty.", ephemeral=True)
             return
-
         msg = "**🎶 Song Queue:**\n"
         for i, song in enumerate(bot.queues[guild_id], 1):
             duration = song.get('duration', 0)
             minutes, seconds = divmod(duration, 60)
             time_str = f"{minutes}:{seconds:02d}" if duration else "🔴 Live"
             msg += f"`{i}.` **{song['title']}** ({time_str})\n"
-
         if len(msg) > 2000:
             msg = msg[:1997] + "..."
         await interaction.response.send_message(msg, ephemeral=True)
-
 
 @bot.command(name='hmb', description='Open the interactive music control panel')
 async def hmb(ctx):
     if not ctx.author.voice:
         await ctx.send("❌ You must be in a voice channel first!")
         return
-
     voice_channel = ctx.author.voice.channel
     guild_id = ctx.guild.id
-
     if guild_id not in bot.custom_voice_clients or not bot.custom_voice_clients[guild_id].is_connected():
         try:
             vc = await voice_channel.connect()
@@ -335,7 +329,6 @@ async def hmb(ctx):
 
     view = ControlView(ctx)
     volume = int(vc.source.volume * 100) if vc.source and hasattr(vc.source, 'volume') else DEFAULT_VOLUME
-
     embed = discord.Embed(
         title="🎛 **Music Control Panel**",
         description=f"**Guild:** `{ctx.guild.name}`\n"
@@ -344,20 +337,24 @@ async def hmb(ctx):
         color=discord.Color.blurple()
     )
     embed.set_footer(text=f"📋 Queue: {len(bot.queues.get(guild_id, []))} songs")
-
     message = await ctx.send(embed=embed, view=view)
     view.message = message
 
     def disable_buttons():
         for child in view.children:
             child.disabled = True
-
     view.on_timeout = disable_buttons
+
+async def main():
+    # دەستپێکردنی سێرვەری وێب و بۆتەکە پێکەوە بە بێ کێشە
+    server_task = asyncio.create_task(start_web_server())
+    bot_task = asyncio.create_task(bot.start(TOKEN))
+    await asyncio.gather(server_task, bot_task)
 
 if __name__ == "__main__":
     if not TOKEN:
         exit(1)
     try:
-        bot.run(TOKEN)
+        asyncio.run(main())
     except KeyboardInterrupt:
         pass
