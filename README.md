@@ -83,3 +83,6 @@ The 100 slash commands are kept within Discord's top-level slash-command limit. 
 ## Rich Presence Assets
 
 This build sets the bot activity to **Listening to HMB GLOBAL** and references the uploaded Rich Presence asset using `RICH_PRESENCE_ASSET_KEY`. The default key is the asset key visible in the supplied Developer Portal screenshot. If you rename/re-upload the asset, update the environment variable in Fly.io.
+
+### Rich Presence large image
+The bot uses the Discord Rich Presence asset as `large_image` with key `file_0000000049881f49ef3a3b0cb7cdf84`. If Discord assigns a new key after re-uploading the asset, update `ASSET_KEY` in Fly.io Secrets.
