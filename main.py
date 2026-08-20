@@ -346,9 +346,10 @@ async def hmb(ctx):
     view.on_timeout = disable_buttons
 
 async def main():
-    # دەستپێکردنی سێرڤەری وێب و پاشان چاوەڕێکردن بۆ خێرایی کارکردن
-    await start_web_server()
-    await bot.start(TOKEN)
+    # بەستنەوەی هەردوو ئەرکەکە پێکەوە بۆ ئەوەی پڕۆگرامەکە دانەخرێت
+    server_task = asyncio.create_task(start_web_server())
+    bot_task = asyncio.create_task(bot.start(TOKEN))
+    await asyncio.gather(server_task, bot_task)
 
 if __name__ == "__main__":
     if not TOKEN:
