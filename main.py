@@ -18,7 +18,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is running perfectly with 100+ Slash Commands!"
+    return "Discord Music Bot is online — 101 slash commands + 101 !prefix commands."
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -48,6 +48,145 @@ class MusicBot(commands.Bot):
 
 bot = MusicBot()
 bot.remove_command('help')
+
+# ---------------------------------------------------------------------------
+# Prefix-command bridge
+# ---------------------------------------------------------------------------
+# Every command in this project is registered as a Discord slash command and
+# also as a legacy command.  The callbacks are written against Interaction,
+# so this small adapter lets the same callback work with !prefix messages too.
+class _PrefixResponse:
+    def __init__(self, ctx):
+        self.ctx = ctx
+        self._done = False
+
+    @property
+    def is_done(self):
+        return self._done
+
+    async def send_message(self, content=None, *, embed=None, embeds=None,
+                           ephemeral=False, **kwargs):
+        self._done = True
+        kwargs.pop('ephemeral', None)
+        if content is not None:
+            return await self.ctx.send(content, embed=embed, embeds=embeds, **kwargs)
+        return await self.ctx.send(embed=embed, embeds=embeds, **kwargs)
+
+    async def defer(self, *, ephemeral=False, thinking=True):
+        # Prefix messages do not need an interaction acknowledgement.
+        self._done = True
+
+class _PrefixFollowup:
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    async def send(self, content=None, *, embed=None, embeds=None,
+                   ephemeral=False, **kwargs):
+        kwargs.pop('ephemeral', None)
+        if content is not None:
+            return await self.ctx.send(content, embed=embed, embeds=embeds, **kwargs)
+        return await self.ctx.send(embed=embed, embeds=embeds, **kwargs)
+
+class PrefixInteraction:
+    def __init__(self, ctx):
+        self._ctx = ctx
+        self.user = ctx.author
+        self.guild = ctx.guild
+        self.guild_id = ctx.guild.id if ctx.guild else None
+        self.channel = ctx.channel
+        self.message = ctx.message
+        self.response = _PrefixResponse(ctx)
+        self.followup = _PrefixFollowup(ctx)
+
+async def _convert_prefix_arg(ctx, annotation, token):
+    """Convert common slash-command annotations to prefix arguments."""
+    ann = str(annotation).replace('typing.', '')
+    if 'Optional[' in ann:
+        inner = ann.split('Optional[', 1)[1].rsplit(']', 1)[0]
+        if token is None:
+            return None
+        ann = inner
+    if token is None:
+        return None
+    if ann == 'int':
+        return int(token)
+    if ann == 'float':
+        return float(token)
+    if ann == 'bool':
+        value = token.lower()
+        if value in ('1', 'true', 'yes', 'on', 'enable', 'enabled'):
+            return True
+        if value in ('0', 'false', 'no', 'off', 'disable', 'disabled'):
+            return False
+        raise ValueError('Use true/false for this option.')
+    if ann in ('discord.User', 'discord.Member'):
+        return await commands.UserConverter().convert(ctx, token)
+    return token
+
+async def dispatch_prefix_command(message):
+    if message.author.bot or not message.content.startswith('!'):
+        return False
+
+    import shlex
+    try:
+        parts = shlex.split(message.content[1:])
+    except ValueError:
+        parts = message.content[1:].split()
+    if not parts:
+        return False
+
+    name = parts.pop(0).lower()
+    command = bot.get_command(name)
+    if command is None:
+        return False
+
+    callback = command.callback
+    import inspect
+    ctx = await bot.get_context(message)
+    params = list(inspect.signature(callback).parameters.values())[1:]  # skip interaction
+    values = []
+    index = 0
+    try:
+        for p in params:
+            annotation = p.annotation
+            required = p.default is inspect._empty
+            if annotation is str and p.name in ('query', 'song', 'name', 'category', 'station', 'preset', 'time', 'mode'):
+                if index < len(parts):
+                    token = ' '.join(parts[index:])
+                    index = len(parts)
+                elif required:
+                    raise ValueError(f'Missing argument: {p.name}')
+                else:
+                    token = None
+            elif index < len(parts):
+                token = parts[index]
+                index += 1
+            elif required:
+                raise ValueError(f'Missing argument: {p.name}')
+            else:
+                token = None
+
+            if token is None and p.default is not inspect._empty:
+                values.append(p.default)
+            else:
+                values.append(await _convert_prefix_arg(ctx, annotation, token))
+
+        await callback(PrefixInteraction(ctx), *values)
+    except (ValueError, TypeError) as exc:
+        await message.channel.send(f'❌ `{name}`: {exc}')
+    except commands.CommandError as exc:
+        await message.channel.send(f'❌ `{name}`: {exc}')
+    except Exception as exc:
+        print(f'Prefix command {name!r} error: {exc}')
+        await message.channel.send(f'❌ Command failed: `{type(exc).__name__}`')
+    return True
+
+@bot.event
+async def on_message(message):
+    if await dispatch_prefix_command(message):
+        return
+    # Do not call process_commands here: the callbacks above are already
+    # invoked through PrefixInteraction, preventing Context/Interaction mixups.
 
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin',
@@ -193,7 +332,7 @@ async def play_next(guild_id):
 
 @bot.event
 async def on_ready():
-    activity = discord.Activity(type=discord.ActivityType.listening, name="/play | 100+ Commands")
+    activity = discord.Activity(type=discord.ActivityType.listening, name="!play | /play | 100+ Commands")
     await bot.change_presence(activity=activity)
     print(f'✅ Bot is ready! Logged in as {bot.user}')
 
@@ -1740,4 +1879,12 @@ async def uptime_seconds(interaction: discord.Interaction):
     await interaction.response.send_message(f"⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds")
 
 if __name__ == '__main__':
+    # Fly.io health endpoint.  Flask runs in a background thread while the
+    # Discord gateway owns the main thread.
+    import threading
+    port = int(os.getenv('PORT', '8080'))
+    threading.Thread(
+        target=lambda: app.run(host='0.0.0.0', port=port, use_reloader=False),
+        daemon=True,
+    ).start()
     bot.run(TOKEN)

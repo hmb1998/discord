@@ -1,7 +1,12 @@
-app = "discord-esjwfw"
+app = "discord-music-bot"
 primary_region = "fra"
 
 [build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  DEFAULT_VOLUME = "0.50"
 
 [http_service]
   internal_port = 8080
@@ -9,3 +14,11 @@ primary_region = "fra"
   auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/"
