@@ -15,7 +15,7 @@ intents.voice_states = True
 
 class MusicBot(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix='$', intents=intents)
+        super().__init__(command_prefix='!', intents=intents)
         self.queues = {}
         self.custom_voice_clients = {}
 
@@ -112,7 +112,7 @@ async def play_next_message(ctx):
 
 @bot.event
 async def on_ready():
-    activity = discord.Activity(type=discord.ActivityType.listening, name="$help")
+    activity = discord.Activity(type=discord.ActivityType.listening, name="!hmb")
     await bot.change_presence(activity=activity)
     print(f'✅ Bot is ready! Logged in as {bot.user}')
 
@@ -312,8 +312,8 @@ class ControlView(discord.ui.View):
         await interaction.response.send_message(msg, ephemeral=True)
 
 
-@bot.command(name='control', description='Open the interactive music control panel')
-async def control(ctx):
+@bot.command(name='hmb', description='Open the interactive music control panel')
+async def hmb(ctx):
     if not ctx.author.voice:
         await ctx.send("❌ You must be in a voice channel first!")
         return
@@ -359,12 +359,12 @@ async def control(ctx):
 async def help_command(ctx):
     embed = discord.Embed(
         title="🤖 **Music Bot Commands**",
-        description="Here are all available commands using the `$` prefix:",
+        description="Here are all available commands using the `!` prefix:",
         color=discord.Color.blurple()
     )
-    embed.add_field(name="`$control`", value="Opens the interactive control panel with buttons & search box.", inline=False)
-    embed.add_field(name="`$help`", value="Shows this help menu.", inline=False)
-    embed.set_footer(text="🎵 Music Bot • All commands use $")
+    embed.add_field(name="`!hmb`", value="Opens the interactive control panel with buttons & search box.", inline=False)
+    embed.add_field(name="`!help`", value="Shows this help menu.", inline=False)
+    embed.set_footer(text="🎵 Music Bot • All commands use !")
     await ctx.send(embed=embed)
 
 
