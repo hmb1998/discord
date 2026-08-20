@@ -4,7 +4,6 @@ import yt_dlp
 import asyncio
 import os
 import re
-from aiohttp import web
 from config import TOKEN, DEFAULT_VOLUME
 
 intents = discord.Intents.default()
@@ -107,19 +106,6 @@ async def play_next_message(ctx):
             fut.result()
         except:
             pass
-
-# Web server for Fly.io health checks
-async def handle_ping(request):
-    return web.Response(text="OK")
-
-async def start_web_server():
-    app = web.Application()
-    app.add_routes([web.get('/', handle_ping), web.get('/healthz', handle_ping)])
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
-    print("🌐 Web server started instantly on port 8080")
 
 @bot.event
 async def on_ready():
@@ -368,17 +354,10 @@ async def hmb(ctx):
 
     view.on_timeout = disable_buttons
 
-
-async def main():
-    await asyncio.gather(
-        start_web_server(),
-        bot.start(TOKEN)
-    )
-
 if __name__ == "__main__":
     if not TOKEN:
         exit(1)
     try:
-        asyncio.run(main())
+        bot.run(TOKEN)
     except KeyboardInterrupt:
         pass
