@@ -109,7 +109,6 @@ async def play_next_message(ctx):
         except:
             pass
 
-# Ultra-simple HTTP Server for Fly.io health checks that never fails or exits
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -128,9 +127,6 @@ async def on_ready():
     await bot.change_presence(activity=activity)
     print(f'✅ Bot is ready! Logged in as {bot.user}')
 
-# ============================================================
-# SEARCH MODAL & VIEWS
-# ============================================================
 class SongSearchModal(discord.ui.Modal, title="🔍 Search or Play Song"):
     song_query = discord.ui.TextInput(
         label="Song Name or YouTube Link",
@@ -350,7 +346,6 @@ if __name__ == "__main__":
     if not TOKEN:
         exit(1)
     
-    # داگیرکردنی پۆرتەکە لە تریدێکی سەربەخۆدا بۆ ئەوەی هێلت چێک سەرکەوتوو بێت و قەت نەوەستێت
     server_thread = threading.Thread(target=run_http_server, daemon=True)
     server_thread.start()
 
