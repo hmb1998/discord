@@ -221,6 +221,15 @@ class ControlView(discord.ui.View):
         embed.set_footer(text=f"📋 Queue: {queue_len} songs • 🎵 Music Bot")
         return embed
 
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        try:
+            if self.message:
+                await self.message.edit(view=self)
+        except:
+            pass
+
     @discord.ui.button(label="🔍 Search & Play", style=discord.ButtonStyle.primary, row=0)
     async def search_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.voice:
@@ -362,12 +371,6 @@ async def hmb(ctx):
 
     message = await ctx.send(embed=embed, view=view)
     view.message = message
-
-    def disable_buttons():
-        for child in view.children:
-            child.disabled = True
-
-    view.on_timeout = disable_buttons
 
 
 @bot.command(name='help', description='Show available commands')
