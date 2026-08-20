@@ -4,6 +4,7 @@ import yt_dlp
 import asyncio
 import os
 import re
+import threading
 from aiohttp import web
 from config import TOKEN, DEFAULT_VOLUME
 
@@ -108,18 +109,25 @@ async def play_next_message(ctx):
         except:
             pass
 
-# Instant Web Server for Fly.io health checks
+# Web Server using Threading to prevent blocking the bot
 async def handle_ping(request):
     return web.Response(text="OK")
 
-async def start_web_server():
+def run_web_server():
     app = web.Application()
     app.add_routes([web.get('/', handle_ping), web.get('/healthz', handle_ping)])
     runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
-    print("🌐 Web server successfully started and listening on port 8080")
+    
+    async def start():
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', 8080)
+        await site.start()
+        print("🌐 Web server successfully started and listening on port 8080")
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(start())
+    loop.run_forever()
 
 @bot.event
 async def on_ready():
@@ -345,16 +353,15 @@ async def hmb(ctx):
             child.disabled = True
     view.on_timeout = disable_buttons
 
-async def main():
-    # بەستنەوەی هەردوو ئەرکەکە پێکەوە بۆ ئەوەی پڕۆگرامەکە دانەخرێت
-    server_task = asyncio.create_task(start_web_server())
-    bot_task = asyncio.create_task(bot.start(TOKEN))
-    await asyncio.gather(server_task, bot_task)
-
 if __name__ == "__main__":
     if not TOKEN:
         exit(1)
+    
+    # دەستپێکردنی سێرڤەری وێب لە تریدێکی جیاوازدا بۆ ئەوەی هێلت چێک قەت نەپچڕێت
+    server_thread = threading.Thread(target=run_web_server, daemon=True)
+    server_thread.start()
+
     try:
-        asyncio.run(main())
+        bot.run(TOKEN)
     except KeyboardInterrupt:
         pass
