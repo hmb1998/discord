@@ -1,0 +1,38 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyo
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Downloads directory
+downloads/
+
+# Audio files
+*.mp3
+*.mp4
+*.wav
+*.ogg
+
+# Secret files
+**/secret*
+**/token*
