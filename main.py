@@ -4,11 +4,8 @@ import yt_dlp
 import asyncio
 import os
 import re
-import requests
-import zipfile
-import io
 from aiohttp import web
-from config import TOKEN, GITHUB_FILES_URL, DEFAULT_VOLUME
+from config import TOKEN, DEFAULT_VOLUME
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -131,7 +128,6 @@ async def start_web_server():
 async def on_ready():
     activity = discord.Activity(type=discord.ActivityType.listening, name="/hmb")
     await bot.change_presence(activity=activity)
-    await start_web_server()
     print(f'✅ Bot is ready! Logged in as {bot.user}')
 
 # ============================================================
@@ -377,7 +373,12 @@ async def hmb(interaction: discord.Interaction):
     view.message = message
 
 
+async def main():
+    await start_web_server()
+    async with bot:
+        await bot.start(TOKEN)
+
 if __name__ == "__main__":
     if not TOKEN:
         exit(1)
-    bot.run(TOKEN)
+    asyncio.run(main())
