@@ -253,13 +253,17 @@ async def get_voice_client(ctx_or_interaction):
         user = ctx_or_interaction.user
         guild = ctx_or_interaction.guild
         respond = ctx_or_interaction.response.send_message
+        response_kwargs = {"ephemeral": True}
     else:
-        user = ctx_or_interaction.author
+        # PrefixInteraction / commands.Context do not support the Discord
+        # interaction-only ``ephemeral`` keyword.
+        user = ctx_or_interaction.author if hasattr(ctx_or_interaction, "author") else ctx_or_interaction.user
         guild = ctx_or_interaction.guild
-        respond = ctx_or_interaction.send
+        respond = ctx_or_interaction.send if hasattr(ctx_or_interaction, "send") else ctx_or_interaction.response.send_message
+        response_kwargs = {}
 
     if not user.voice:
-        await respond("❌ You must be in a voice channel first!", ephemeral=True)
+        await respond("❌ You must be in a voice channel first!", **response_kwargs)
         return None, None
     
     voice_channel = user.voice.channel
@@ -274,7 +278,7 @@ async def get_voice_client(ctx_or_interaction):
             vc = await voice_channel.connect()
             bot.custom_voice_clients[guild_id] = vc
         except Exception as e:
-            await respond(f"❌ Could not connect: {str(e)[:100]}", ephemeral=True)
+            await respond(f"❌ Could not connect: {str(e)[:100]}", **response_kwargs)
             return None, None
     
     return vc, respond
