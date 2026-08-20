@@ -33,7 +33,12 @@ class MusicBot(commands.Bot):
         self.start_time = time.time()
 
     async def setup_hook(self):
-        print("✅ Bot is setting up safely without auto-sync (prevents 429 errors)...")
+        print("✅ Syncing commands...")
+        try:
+            synced = await self.tree.sync()
+            print(f"✅ Successfully synced {len(synced)} commands!")
+        except Exception as e:
+            print(f"❌ Failed to sync commands: {e}")
 
 bot = MusicBot()
 bot.remove_command('help')
