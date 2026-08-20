@@ -26,17 +26,18 @@ bot = MusicBot()
 bot.remove_command('help')
 
 FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn'
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin',
+    'options': '-vn -b:a 128k'
 }
 
 YDL_OPTIONS = {
-    'format': 'bestaudio/best',
+    'format': 'bestaudio[ext=m4a]/bestaudio/best',
     'quiet': True,
     'noplaylist': True,
     'extract_flat': False,
     'default_search': 'ytsearch',
-    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    'skip_download': True,
+    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
 def search_youtube(query):
@@ -87,8 +88,7 @@ async def play_next_message(ctx):
             pass
 
     try:
-        ydl_opts = {'format': 'bestaudio/best', 'quiet': True}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
             info = ydl.extract_info(song['url'], download=False)
             audio_url = info['url']
 
@@ -102,6 +102,7 @@ async def play_next_message(ctx):
         except:
             pass
     except Exception as e:
+        print(f"Error in playback: {e}")
         coro = play_next_message(ctx)
         fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
         try:
@@ -116,7 +117,7 @@ async def on_ready():
     print(f'✅ Bot is ready! Logged in as {bot.user}')
 
 # ============================================================
-# SEARCH MODAL (فۆرمی گەڕان)
+# SEARCH MODAL
 # ============================================================
 class SongSearchModal(discord.ui.Modal, title="🔍 Search or Play Song"):
     song_query = discord.ui.TextInput(
