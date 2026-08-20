@@ -1,4 +1,4 @@
-import discord
+Import discord
 from discord import app_commands
 from discord.ext import commands
 import yt_dlp
@@ -395,12 +395,12 @@ async def queue(interaction: discord.Interaction):
     # Now playing
     if guild_id in bot.now_playing:
         np = bot.now_playing[guild_id]
-        embed.add_field(name="▶️ Now Playing", value=f"[{np['title']}]({np['url']}) (`{format_time(np['duration'])}`)", inline=False)
+        embed.add_field(name="▶ Now Playing", value=f"[{np['title']}]({np['url']})")
     
-    # Queue list
+    # Queue list (ڕاستکراوەتەوە)
     queue_text = ""
     for i, song in enumerate(bot.queues[guild_id], 1):
-        queue_text += f"`{i}.` [{song['title'][:50]}]({song['url']}) ({format_time(song['duration'])})\n"
+        queue_text += f"`{i}.` [{song['title'][:50]}]({song['url']}) - {format_time(song['duration'])}\n"
         if len(queue_text) > 1000:
             queue_text += f"... and {len(bot.queues[guild_id]) - i} more"
             break
@@ -424,7 +424,7 @@ async def nowplaying(interaction: discord.Interaction, ephemeral: Optional[bool]
     vc = get_vc(guild_id)
     
     embed = discord.Embed(title="🎶 Now Playing", color=discord.Color.green())
-    embed.add_field(name="Title", value=f"[{song['title']}]({song['url'])")
+    embed.add_field(name="Title", value=f"[{song['title']}]({song['url']})")
     embed.add_field(name="Duration", value=format_time(song['duration']))
     embed.add_field(name="Channel", value=song.get('channel', 'Unknown'))
     
@@ -512,7 +512,6 @@ async def seek(interaction: discord.Interaction, seconds: int):
         await interaction.response.send_message(f"❌ Cannot seek past song duration ({format_time(duration)})", ephemeral=True)
         return
     
-    # Restart playback at position - we need to recreate the source
     vc.stop()
     try:
         with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
@@ -529,7 +528,6 @@ async def seek(interaction: discord.Interaction, seconds: int):
         await interaction.response.send_message(f"⏩ **Seeked to** {format_time(seconds)}")
     except Exception as e:
         await interaction.response.send_message(f"❌ Seek error: {str(e)[:100]}", ephemeral=True)
-        # Replay without seek
         coro = play_next(guild_id)
         asyncio.run_coroutine_threadsafe(coro, bot.loop)
 
@@ -625,7 +623,6 @@ async def favorite_add(interaction: discord.Interaction):
         bot.favorites[user_id] = []
     
     song = bot.now_playing[guild_id]
-    # Check if already exists
     for fav in bot.favorites[user_id]:
         if fav['url'] == song['url']:
             await interaction.response.send_message("⭐ Already in your favorites!", ephemeral=True)
@@ -1078,7 +1075,6 @@ async def goto(interaction: discord.Interaction, position: int):
         await interaction.response.send_message(f"❌ Invalid position (1-{len(bot.queues[guild_id])})", ephemeral=True)
         return
     
-    # Remove all songs before the target
     bot.queues[guild_id] = bot.queues[guild_id][idx:]
     vc = get_vc(guild_id)
     if vc and vc.is_playing():
@@ -1105,11 +1101,9 @@ async def radio(interaction: discord.Interaction, station: str):
     
     guild_id = interaction.guild_id
     
-    # Stop current playback
     if vc.is_playing():
         vc.stop()
     
-    # Clear queue
     bot.queues[guild_id] = []
     
     try:
@@ -1212,10 +1206,8 @@ async def forward(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Nothing playing", ephemeral=True)
         return
     
-    # Can't get current position easily with FFmpegPCMAudio, so use seek approximation
     current_song = bot.now_playing[guild_id]
     dur = current_song.get('duration', 0)
-    # Just play the current song from ~ half point + 10
     mid_point = min(dur // 2 + 10, dur - 10) if dur > 20 else 10
     await seek.callback(interaction, seconds=mid_point)
 
@@ -1382,7 +1374,6 @@ async def voteskip(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Nothing playing", ephemeral=True)
         return
     
-    # Simple implementation - just skip if voter is in VC
     if interaction.user.voice and vc.channel == interaction.user.voice.channel:
         vc.stop()
         await interaction.response.send_message("🗳 **Vote Skip:** Song skipped!")
@@ -1477,4 +1468,3 @@ async def recent(interaction: discord.Interaction):
     embed = discord.Embed(title="🕐 Recently Played", color=discord.Color.dark_blue())
     for i, s in enumerate(reversed(recent_songs), 1):
         embed.add_field(name=f"{i}. {s['title'][:80]}", value=f"{s['url']}")
-
