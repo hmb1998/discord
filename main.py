@@ -4,8 +4,19 @@ import yt_dlp
 import asyncio
 import os
 import re
-from aiohttp import web
+import threading
+from flask import Flask
 from config import TOKEN, DEFAULT_VOLUME
+
+# دروستکردنی فڵەسک بۆ وێب سەروەر لەسەر پۆرتی 8080 بۆ ڕێگریکردن لە داخستنی مەشینەکە
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -107,19 +118,6 @@ async def play_next_message(ctx):
             fut.result()
         except:
             pass
-
-async def handle_ping(request):
-    return web.Response(text="OK")
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', handle_ping)
-    app.router.add_get('/healthz', handle_ping)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
-    print("🌐 Web server successfully started and listening on port 8080")
 
 @bot.event
 async def on_ready():
@@ -342,15 +340,15 @@ async def hmb(ctx):
             child.disabled = True
     view.on_timeout = disable_buttons
 
-async def main():
-    server_task = asyncio.create_task(start_web_server())
-    bot_task = asyncio.create_task(bot.start(TOKEN))
-    await asyncio.gather(server_task, bot_task)
-
 if __name__ == "__main__":
     if not TOKEN:
         exit(1)
+    
+    # داگیرکردنی پۆرتەکە لە تریدێکی جیاوازدا بە فڵەسک بۆ ئەوەی هەمیشە کاربکات
+    t = threading.Thread(target=run_flask, daemon=True)
+    t.start()
+
     try:
-        asyncio.run(main())
+        bot.run(TOKEN)
     except KeyboardInterrupt:
         pass
