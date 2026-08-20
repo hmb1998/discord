@@ -1476,4 +1476,5 @@ async def recent(interaction: discord.Interaction):
     recent_songs = bot.history[guild_id][-5:]
     embed = discord.Embed(title="🕐 Recently Played", color=discord.Color.dark_blue())
     for i, s in enumerate(reversed(recent_songs), 1):
-        embed.add_field(name=f"`{i}.` {s['title'][:80]}", value=f"
+        embed.add_field(name=f"{i}. {s['title'][:80]}", value=f"{s['url']}")
+
