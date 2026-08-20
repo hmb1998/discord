@@ -5,7 +5,7 @@ import asyncio
 import os
 import re
 import threading
-from aiohttp import web
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from config import TOKEN, DEFAULT_VOLUME
 
 intents = discord.Intents.default()
@@ -109,25 +109,18 @@ async def play_next_message(ctx):
         except:
             pass
 
-# Web Server using Threading to prevent blocking the bot
-async def handle_ping(request):
-    return web.Response(text="OK")
+# Ultra-simple HTTP Server for Fly.io health checks that never fails or exits
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+    def log_message(self, format, *args):
+        pass
 
-def run_web_server():
-    app = web.Application()
-    app.add_routes([web.get('/', handle_ping), web.get('/healthz', handle_ping)])
-    runner = web.AppRunner(app)
-    
-    async def start():
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', 8080)
-        await site.start()
-        print("🌐 Web server successfully started and listening on port 8080")
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(start())
-    loop.run_forever()
+def run_http_server():
+    server = HTTPServer(('0.0.0.0', 8080), SimpleHandler)
+    server.serve_forever()
 
 @bot.event
 async def on_ready():
@@ -357,8 +350,8 @@ if __name__ == "__main__":
     if not TOKEN:
         exit(1)
     
-    # دەستپێکردنی سێرڤەری وێب لە تریدێکی جیاوازدا بۆ ئەوەی هێلت چێک قەت نەپچڕێت
-    server_thread = threading.Thread(target=run_web_server, daemon=True)
+    # داگیرکردنی پۆرتەکە لە تریدێکی سەربەخۆدا بۆ ئەوەی هێلت چێک سەرکەوتوو بێت و قەت نەوەستێت
+    server_thread = threading.Thread(target=run_http_server, daemon=True)
     server_thread.start()
 
     try:
