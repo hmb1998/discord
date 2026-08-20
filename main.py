@@ -4,11 +4,8 @@ import yt_dlp
 import asyncio
 import os
 import re
-import requests
-import zipfile
-import io
 from aiohttp import web
-from config import TOKEN, GITHUB_FILES_URL, BOT_PREFIX, DEFAULT_VOLUME
+from config import TOKEN, DEFAULT_VOLUME
 
 intents = discord.Intents.default()
 intents.message_content = True
