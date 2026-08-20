@@ -9,4 +9,16 @@ primary_region = 'fra'
 [[services]]
   protocol = 'tcp'
   internal_port = 8080
-  # ئەگەر هێلت چێکی هەیە لێرە دەتوانرێت لاببرێت یان پڕۆسەکە تەنها وەک background process دابنرێت
+
+  [[services.ports]]
+    port = 80
+    handlers = ['http']
+
+  [[services.ports]]
+    port = 443
+    handlers = ['tls', 'http']
+
+  [services.concurrency]
+    type = 'requests'
+    hard_limit = 250
+    soft_limit = 200
