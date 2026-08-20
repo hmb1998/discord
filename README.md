@@ -74,3 +74,7 @@ The included `Dockerfile` installs FFmpeg. The included `fly.toml` exposes port 
 ## Security
 
 **Never commit the Discord token to GitHub.** If a token was ever exposed publicly, regenerate it immediately in the Discord Developer Portal.
+
+
+### Prefix command fix
+All 101 `!` prefix aliases are registered separately after the slash callbacks are defined. This avoids the discord.py `command function must be a coroutine function` startup error caused by stacking `@bot.command` on `@bot.tree.command`.

@@ -372,7 +372,6 @@ async def song_autocomplete(interaction: discord.Interaction, current: str):
 # ===== 1. PLAY =====
 @bot.tree.command(name='play', description='🎵 Play a song or add to queue')
 @app_commands.describe(query='Song name or YouTube URL')
-@bot.command(name='play')
 async def play(interaction: discord.Interaction, query: str):
     await interaction.response.defer()
     if not await voice_check(interaction):
@@ -404,7 +403,6 @@ async def play(interaction: discord.Interaction, query: str):
 # ===== 2. PLAY TOP =====
 @bot.tree.command(name='playtop', description='🎵 Add a song to the top of the queue')
 @app_commands.describe(query='Song name or YouTube URL')
-@bot.command(name='playtop')
 async def playtop(interaction: discord.Interaction, query: str):
     await interaction.response.defer()
     if not await voice_check(interaction):
@@ -434,7 +432,6 @@ async def playtop(interaction: discord.Interaction, query: str):
 
 # ===== 3. PAUSE =====
 @bot.tree.command(name='pause', description='⏸ Pause the current song')
-@bot.command(name='pause')
 async def pause(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
@@ -446,7 +443,6 @@ async def pause(interaction: discord.Interaction):
 
 # ===== 4. RESUME =====
 @bot.tree.command(name='resume', description='▶️ Resume playback')
-@bot.command(name='resume')
 async def resume(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
@@ -459,7 +455,6 @@ async def resume(interaction: discord.Interaction):
 # ===== 5. SKIP =====
 @bot.tree.command(name='skip', description='⏭ Skip the current song')
 @app_commands.describe(count='Number of songs to skip (default: 1)')
-@bot.command(name='skip')
 async def skip(interaction: discord.Interaction, count: Optional[int] = 1):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
@@ -473,7 +468,6 @@ async def skip(interaction: discord.Interaction, count: Optional[int] = 1):
 
 # ===== 6. STOP =====
 @bot.tree.command(name='stop', description='⏹ Stop playback and clear queue')
-@bot.command(name='stop')
 async def stop(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
@@ -490,7 +484,6 @@ async def stop(interaction: discord.Interaction):
 # ===== 7. VOLUME =====
 @bot.tree.command(name='volume', description='🔊 Set the volume (0-100)')
 @app_commands.describe(percent='Volume percentage (0-100)')
-@bot.command(name='volume')
 async def volume(interaction: discord.Interaction, percent: int):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
@@ -503,7 +496,6 @@ async def volume(interaction: discord.Interaction, percent: int):
 
 # ===== 8. VOLUME_UP =====
 @bot.tree.command(name='volumeup', description='🔊 Increase volume by 10%')
-@bot.command(name='volumeup')
 async def volumeup(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
@@ -516,7 +508,6 @@ async def volumeup(interaction: discord.Interaction):
 
 # ===== 9. VOLUME_DOWN =====
 @bot.tree.command(name='volumedown', description='🔉 Decrease volume by 10%')
-@bot.command(name='volumedown')
 async def volumedown(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
@@ -529,7 +520,6 @@ async def volumedown(interaction: discord.Interaction):
 
 # ===== 10. QUEUE =====
 @bot.tree.command(name='queue', description='📋 Show the song queue')
-@bot.command(name='queue')
 async def queue(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     await interaction.response.defer()
@@ -563,7 +553,6 @@ async def queue(interaction: discord.Interaction):
 # ===== 11. NOWPLAYING =====
 @bot.tree.command(name='nowplaying', description='🎶 Show currently playing song')
 @app_commands.describe(ephemeral='Show only to you (default: False)')
-@bot.command(name='nowplaying')
 async def nowplaying(interaction: discord.Interaction, ephemeral: Optional[bool] = False):
     guild_id = interaction.guild_id
     if guild_id not in bot.now_playing:
@@ -593,7 +582,6 @@ async def nowplaying(interaction: discord.Interaction, ephemeral: Optional[bool]
 @bot.tree.command(name='remove', description='🗑 Remove a song from queue by position')
 @app_commands.describe(position='Position number in queue')
 @app_commands.autocomplete(position=song_autocomplete)
-@bot.command(name='remove')
 async def remove(interaction: discord.Interaction, position: int):
     guild_id = interaction.guild_id
     if guild_id not in bot.queues or len(bot.queues[guild_id]) == 0:
@@ -610,7 +598,6 @@ async def remove(interaction: discord.Interaction, position: int):
 
 # ===== 13. CLEAR =====
 @bot.tree.command(name='clear', description='🧹 Clear the entire queue')
-@bot.command(name='clear')
 async def clear(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id in bot.queues:
@@ -622,7 +609,6 @@ async def clear(interaction: discord.Interaction):
 
 # ===== 14. SHUFFLE =====
 @bot.tree.command(name='shuffle', description='🔀 Toggle shuffle mode')
-@bot.command(name='shuffle')
 async def shuffle(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     current = bot.shuffle_mode.get(guild_id, False)
@@ -635,7 +621,6 @@ async def shuffle(interaction: discord.Interaction):
 
 # ===== 15. LOOP =====
 @bot.tree.command(name='loop', description='🔄 Set loop mode (none/song/queue)')
-@bot.command(name='loop')
 @app_commands.describe(mode='Loop mode: none, song, or queue')
 @app_commands.choices(mode=[
     app_commands.Choice(name='❌ None', value='none'),
@@ -650,7 +635,6 @@ async def loop(interaction: discord.Interaction, mode: str):
 # ===== 16. SEEK =====
 @bot.tree.command(name='seek', description='⏩ Seek to a position in the current song (seconds)')
 @app_commands.describe(seconds='Position in seconds')
-@bot.command(name='seek')
 async def seek(interaction: discord.Interaction, seconds: int):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
@@ -691,7 +675,6 @@ async def seek(interaction: discord.Interaction, seconds: int):
 # ===== 17. MOVESONG =====
 @bot.tree.command(name='move', description='↕️ Move a song to a different position in queue')
 @app_commands.describe(from_position='Current position', to_position='New position')
-@bot.command(name='move')
 async def move(interaction: discord.Interaction, from_position: int, to_position: int):
     guild_id = interaction.guild_id
     if guild_id not in bot.queues or len(bot.queues[guild_id]) < 2:
@@ -712,7 +695,6 @@ async def move(interaction: discord.Interaction, from_position: int, to_position
 
 # ===== 18. JOIN =====
 @bot.tree.command(name='join', description='📡 Join your voice channel')
-@bot.command(name='join')
 async def join(interaction: discord.Interaction):
     await interaction.response.defer()
     if not await voice_check(interaction):
@@ -723,7 +705,6 @@ async def join(interaction: discord.Interaction):
 
 # ===== 19. LEAVE =====
 @bot.tree.command(name='leave', description='👋 Leave the voice channel')
-@bot.command(name='leave')
 async def leave(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
@@ -740,14 +721,12 @@ async def leave(interaction: discord.Interaction):
 
 # ===== 20. DISCONNECT =====
 @bot.tree.command(name='disconnect', description='👋 Same as /leave - disconnect from voice')
-@bot.command(name='disconnect')
 async def disconnect(interaction: discord.Interaction):
     await leave.callback(interaction)
 
 # ===== 21. SEARCH =====
 @bot.tree.command(name='search', description='🔍 Search for songs and choose one')
 @app_commands.describe(query='Search query')
-@bot.command(name='search')
 async def search(interaction: discord.Interaction, query: str):
     await interaction.response.defer()
     
@@ -774,7 +753,6 @@ async def search(interaction: discord.Interaction, query: str):
 
 # ===== 22-31. FAVORITES =====
 @bot.tree.command(name='favorite_add', description='⭐ Save current song to favorites')
-@bot.command(name='favorite_add')
 async def favorite_add(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id not in bot.now_playing:
@@ -802,7 +780,6 @@ async def favorite_add(interaction: discord.Interaction):
 
 @bot.tree.command(name='favorite_remove', description='⭐ Remove a song from favorites')
 @app_commands.describe(index='Favorite number')
-@bot.command(name='favorite_remove')
 async def favorite_remove(interaction: discord.Interaction, index: int):
     user_id = interaction.user.id
     if user_id not in bot.favorites or len(bot.favorites[user_id]) == 0:
@@ -818,7 +795,6 @@ async def favorite_remove(interaction: discord.Interaction, index: int):
     await interaction.response.send_message(f"⭐ **Removed:** {song['title']}")
 
 @bot.tree.command(name='favorite_list', description='⭐ Show your favorite songs')
-@bot.command(name='favorite_list')
 async def favorite_list(interaction: discord.Interaction):
     user_id = interaction.user.id
     if user_id not in bot.favorites or len(bot.favorites[user_id]) == 0:
@@ -833,7 +809,6 @@ async def favorite_list(interaction: discord.Interaction):
 
 @bot.tree.command(name='favorite_play', description='⭐ Play a song from your favorites')
 @app_commands.describe(index='Favorite number to play')
-@bot.command(name='favorite_play')
 async def favorite_play(interaction: discord.Interaction, index: int):
     await interaction.response.defer()
     user_id = interaction.user.id
@@ -870,7 +845,6 @@ async def favorite_play(interaction: discord.Interaction, index: int):
 # ===== 32-35. PLAYLISTS =====
 @bot.tree.command(name='playlist_create', description='📁 Create a new playlist')
 @app_commands.describe(name='Playlist name')
-@bot.command(name='playlist_create')
 async def playlist_create(interaction: discord.Interaction, name: str):
     user_id = interaction.user.id
     if user_id not in bot.playlists:
@@ -885,7 +859,6 @@ async def playlist_create(interaction: discord.Interaction, name: str):
 
 @bot.tree.command(name='playlist_delete', description='📁 Delete a playlist')
 @app_commands.describe(name='Playlist name')
-@bot.command(name='playlist_delete')
 async def playlist_delete(interaction: discord.Interaction, name: str):
     user_id = interaction.user.id
     if user_id not in bot.playlists or name not in bot.playlists[user_id]:
@@ -897,7 +870,6 @@ async def playlist_delete(interaction: discord.Interaction, name: str):
 
 @bot.tree.command(name='playlist_add', description='📁 Add current song to a playlist')
 @app_commands.describe(name='Playlist name')
-@bot.command(name='playlist_add')
 async def playlist_add(interaction: discord.Interaction, name: str):
     guild_id = interaction.guild_id
     user_id = interaction.user.id
@@ -920,7 +892,6 @@ async def playlist_add(interaction: discord.Interaction, name: str):
     await interaction.response.send_message(f"📁 **Added to '{name}':** {song['title']}")
 
 @bot.tree.command(name='playlist_list', description='📁 List all your playlists')
-@bot.command(name='playlist_list')
 async def playlist_list(interaction: discord.Interaction):
     user_id = interaction.user.id
     if user_id not in bot.playlists or len(bot.playlists[user_id]) == 0:
@@ -935,7 +906,6 @@ async def playlist_list(interaction: discord.Interaction):
 
 @bot.tree.command(name='playlist_play', description='📁 Play all songs from a playlist')
 @app_commands.describe(name='Playlist name')
-@bot.command(name='playlist_play')
 async def playlist_play(interaction: discord.Interaction, name: str):
     await interaction.response.defer()
     user_id = interaction.user.id
@@ -971,7 +941,6 @@ async def playlist_play(interaction: discord.Interaction, name: str):
 
 @bot.tree.command(name='playlist_info', description='📁 Show details of a playlist')
 @app_commands.describe(name='Playlist name')
-@bot.command(name='playlist_info')
 async def playlist_info(interaction: discord.Interaction, name: str):
     user_id = interaction.user.id
     if user_id not in bot.playlists or name not in bot.playlists[user_id]:
@@ -997,7 +966,6 @@ async def playlist_info(interaction: discord.Interaction, name: str):
 
 # ===== 36-37. HISTORY =====
 @bot.tree.command(name='history', description='📜 Show recently played songs')
-@bot.command(name='history')
 async def history(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id not in bot.history or len(bot.history[guild_id]) == 0:
@@ -1012,7 +980,6 @@ async def history(interaction: discord.Interaction):
 
 @bot.tree.command(name='history_play', description='📜 Play a song from history')
 @app_commands.describe(index='History number')
-@bot.command(name='history_play')
 async def history_play(interaction: discord.Interaction, index: int):
     await interaction.response.defer()
     guild_id = interaction.guild_id
@@ -1049,7 +1016,6 @@ async def history_play(interaction: discord.Interaction, index: int):
 # ===== 38-40. LYRICS =====
 @bot.tree.command(name='lyrics', description='📝 Get lyrics for current or specified song')
 @app_commands.describe(song='Song name (optional, uses current if empty)')
-@bot.command(name='lyrics')
 async def lyrics(interaction: discord.Interaction, song: Optional[str] = None):
     await interaction.response.defer()
     
@@ -1087,14 +1053,12 @@ async def lyrics(interaction: discord.Interaction, song: Optional[str] = None):
 
 # ===== 41. PING =====
 @bot.tree.command(name='ping', description='🏓 Check bot latency')
-@bot.command(name='ping')
 async def ping(interaction: discord.Interaction):
     latency = round(bot.latency * 1000)
     await interaction.response.send_message(f"🏓 **Pong!** `{latency}ms`")
 
 # ===== 42. UPTIME =====
 @bot.tree.command(name='uptime', description='⏰ Show bot uptime')
-@bot.command(name='uptime')
 async def uptime(interaction: discord.Interaction):
     uptime_seconds = int(time.time() - bot.start_time)
     days, remainder = divmod(uptime_seconds, 86400)
@@ -1111,7 +1075,6 @@ async def uptime(interaction: discord.Interaction):
 
 # ===== 43. STATS =====
 @bot.tree.command(name='stats', description='📊 Show bot statistics')
-@bot.command(name='stats')
 async def stats(interaction: discord.Interaction):
     guild_count = len(bot.guilds)
     user_count = sum(g.member_count for g in bot.guilds)
@@ -1130,7 +1093,6 @@ async def stats(interaction: discord.Interaction):
 
 # ===== 44. HELP =====
 @bot.tree.command(name='help', description='ℹ️ Show help with all commands')
-@bot.command(name='help')
 @app_commands.describe(category='Command category')
 @app_commands.choices(category=[
     app_commands.Choice(name='🎵 All Commands', value='all'),
@@ -1169,28 +1131,24 @@ async def help(interaction: discord.Interaction, category: Optional[str] = 'all'
 
 # ===== 45-48. EFFECTS =====
 @bot.tree.command(name='bassboost', description='🎛 Toggle bass boost effect')
-@bot.command(name='bassboost')
 async def bassboost(interaction: discord.Interaction):
     if not await voice_check(interaction):
         return
     await interaction.response.send_message("🎛 **Bass Boost:** Check your audio client settings (not available on all systems)")
 
 @bot.tree.command(name='nightcore', description='🎛 Toggle nightcore effect')
-@bot.command(name='nightcore')
 async def nightcore(interaction: discord.Interaction):
     if not await voice_check(interaction):
         return
     await interaction.response.send_message("🎛 **Nightcore:** Try at your own risk! (effect may vary)")
 
 @bot.tree.command(name='vaporwave', description='🎛 Toggle vaporwave effect')
-@bot.command(name='vaporwave')
 async def vaporwave(interaction: discord.Interaction):
     if not await voice_check(interaction):
         return
     await interaction.response.send_message("🎛 **Vaporwave:** Slowing down for that retro feel")
 
 @bot.tree.command(name='slow', description='🎛 Slow down playback')
-@bot.command(name='slow')
 async def slow(interaction: discord.Interaction):
     if not await voice_check(interaction):
         return
@@ -1198,7 +1156,6 @@ async def slow(interaction: discord.Interaction):
 
 @bot.tree.command(name='speed', description='🎛 Change playback speed (0.5-2.0)')
 @app_commands.describe(multiplier='Speed multiplier (0.5-2.0)')
-@bot.command(name='speed')
 async def speed(interaction: discord.Interaction, multiplier: float):
     if multiplier < 0.5 or multiplier > 2.0:
         await interaction.response.send_message("❌ Speed must be between 0.5 and 2.0", ephemeral=True)
@@ -1206,7 +1163,6 @@ async def speed(interaction: discord.Interaction, multiplier: float):
     await interaction.response.send_message(f"🎛 **Speed:** {multiplier}x (reconnect recommended for best results)")
 
 @bot.tree.command(name='equalizer', description='🎛 Set equalizer preset')
-@bot.command(name='equalizer')
 @app_commands.choices(preset=[
     app_commands.Choice(name='🎵 Normal', value='normal'),
     app_commands.Choice(name='🔊 Bass', value='bass'),
@@ -1222,14 +1178,12 @@ async def equalizer(interaction: discord.Interaction, preset: str):
 
 # ===== 49. KARAOKE =====
 @bot.tree.command(name='karaoke', description='🎤 Toggle karaoke mode (removes vocals)')
-@bot.command(name='karaoke')
 async def karaoke(interaction: discord.Interaction):
     await interaction.response.send_message("🎤 **Karaoke Mode:** Check audio settings for center channel removal")
 
 # ===== 50. SLEEP =====
 @bot.tree.command(name='sleep', description='💤 Set a sleep timer to stop music')
 @app_commands.describe(minutes='Minutes until stop (1-120)')
-@bot.command(name='sleep')
 async def sleep(interaction: discord.Interaction, minutes: int):
     if minutes < 1 or minutes > 120:
         await interaction.response.send_message("❌ Minutes must be between 1 and 120", ephemeral=True)
@@ -1241,7 +1195,6 @@ async def sleep(interaction: discord.Interaction, minutes: int):
     await interaction.response.send_message(f"💤 **Sleep Timer:** Music will stop in {minutes} minutes")
 
 @bot.tree.command(name='sleeptimer_cancel', description='💤 Cancel the sleep timer')
-@bot.command(name='sleeptimer_cancel')
 async def sleeptimer_cancel(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id in bot.sleep_timers:
@@ -1253,7 +1206,6 @@ async def sleeptimer_cancel(interaction: discord.Interaction):
 # ===== 51-52. GOTO =====
 @bot.tree.command(name='goto', description='⏩ Jump to a specific song in queue')
 @app_commands.describe(position='Queue position to jump to')
-@bot.command(name='goto')
 async def goto(interaction: discord.Interaction, position: int):
     guild_id = interaction.guild_id
     if guild_id not in bot.queues or len(bot.queues[guild_id]) == 0:
@@ -1275,7 +1227,6 @@ async def goto(interaction: discord.Interaction, position: int):
 
 # ===== 53. RADIO =====
 @bot.tree.command(name='radio', description='📻 Play an internet radio station')
-@bot.command(name='radio')
 @app_commands.choices(station=[
     app_commands.Choice(name='🎵 Chillhop', value='https://streams.chillhop.com/mp3'),
     app_commands.Choice(name='🎵 Lo-Fi Girl', value='https://play.streamafrica.net/lofi'),
@@ -1314,7 +1265,6 @@ async def radio(interaction: discord.Interaction, station: str):
 
 # ===== 54-60. ADDITIONAL UTILITY COMMANDS =====
 @bot.tree.command(name='invite', description='📩 Get bot invite link')
-@bot.command(name='invite')
 async def invite(interaction: discord.Interaction):
     invite_url = f"https://discord.com/api/oauth2/authorize?client_id={bot.user.id}&permissions=8&scope=bot%20applications.commands"
     embed = discord.Embed(title="📩 Invite Me!", color=discord.Color.green())
@@ -1322,7 +1272,6 @@ async def invite(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name='about', description='ℹ️ About this music bot')
-@bot.command(name='about')
 async def about(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🎵 Music Bot",
@@ -1334,7 +1283,6 @@ async def about(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name='serverinfo', description='ℹ️ Show server information')
-@bot.command(name='serverinfo')
 async def serverinfo(interaction: discord.Interaction):
     guild = interaction.guild
     embed = discord.Embed(title=f"ℹ️ {guild.name}", color=discord.Color.blue())
@@ -1348,7 +1296,6 @@ async def serverinfo(interaction: discord.Interaction):
 
 @bot.tree.command(name='userinfo', description='ℹ️ Show user information')
 @app_commands.describe(user='User to look up')
-@bot.command(name='userinfo')
 async def userinfo(interaction: discord.Interaction, user: Optional[discord.User] = None):
     user = user or interaction.user
     embed = discord.Embed(title=f"ℹ️ {user.display_name}", color=discord.Color.blue())
@@ -1362,7 +1309,6 @@ async def userinfo(interaction: discord.Interaction, user: Optional[discord.User
 
 @bot.tree.command(name='avatar', description='🖼 Show user avatar')
 @app_commands.describe(user='User whose avatar to show')
-@bot.command(name='avatar')
 async def avatar(interaction: discord.Interaction, user: Optional[discord.User] = None):
     user = user or interaction.user
     if user.avatar:
@@ -1373,7 +1319,6 @@ async def avatar(interaction: discord.Interaction, user: Optional[discord.User] 
         await interaction.response.send_message("❌ No avatar found", ephemeral=True)
 
 @bot.tree.command(name='server_icon', description='🖼 Show server icon')
-@bot.command(name='server_icon')
 async def server_icon(interaction: discord.Interaction):
     guild = interaction.guild
     if guild.icon:
@@ -1385,7 +1330,6 @@ async def server_icon(interaction: discord.Interaction):
 
 # ===== 61-70. MORE COMMANDS =====
 @bot.tree.command(name='rewind', description='⏪ Replay the last 10 seconds')
-@bot.command(name='rewind')
 async def rewind(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id not in bot.now_playing:
@@ -1396,7 +1340,6 @@ async def rewind(interaction: discord.Interaction):
     await seek.callback(interaction, seconds=max(0, current_song.get('duration', 30) - 10))
 
 @bot.tree.command(name='forward', description='⏩ Skip ahead 10 seconds')
-@bot.command(name='forward')
 async def forward(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id not in bot.now_playing:
@@ -1416,7 +1359,6 @@ async def forward(interaction: discord.Interaction):
     await seek.callback(interaction, seconds=mid_point)
 
 @bot.tree.command(name='restart', description='🔄 Restart the current song')
-@bot.command(name='restart')
 async def restart(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id not in bot.now_playing:
@@ -1426,7 +1368,6 @@ async def restart(interaction: discord.Interaction):
     await seek.callback(interaction, seconds=0)
 
 @bot.tree.command(name='song_info', description='ℹ️ Show detailed info about current song')
-@bot.command(name='song_info')
 async def song_info(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id not in bot.now_playing:
@@ -1444,7 +1385,6 @@ async def song_info(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name='queue_export', description='📤 Export queue as text')
-@bot.command(name='queue_export')
 async def queue_export(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id not in bot.queues or len(bot.queues[guild_id]) == 0:
@@ -1462,7 +1402,6 @@ async def queue_export(interaction: discord.Interaction):
 
 @bot.tree.command(name='jump', description='🎯 Jump to a specific time in the song (mm:ss)')
 @app_commands.describe(time='Time in format mm:ss')
-@bot.command(name='jump')
 async def jump(interaction: discord.Interaction, time: str):
     try:
         parts = time.split(':')
@@ -1480,7 +1419,6 @@ async def jump(interaction: discord.Interaction, time: str):
 
 @bot.tree.command(name='swap', description='🔄 Swap two songs in the queue')
 @app_commands.describe(pos1='First position', pos2='Second position')
-@bot.command(name='swap')
 async def swap(interaction: discord.Interaction, pos1: int, pos2: int):
     guild_id = interaction.guild_id
     if guild_id not in bot.queues or len(bot.queues[guild_id]) < 2:
@@ -1497,7 +1435,6 @@ async def swap(interaction: discord.Interaction, pos1: int, pos2: int):
     await interaction.response.send_message(f"🔄 **Swapped:** Position `{pos1}` ↔ `{pos2}`")
 
 @bot.tree.command(name='repeat', description='🔂 Toggle repeat (same as loop song)')
-@bot.command(name='repeat')
 async def repeat(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if bot.loop_mode.get(guild_id) == 'song':
@@ -1509,7 +1446,6 @@ async def repeat(interaction: discord.Interaction):
 
 # ===== 71-80. MORE COMMANDS =====
 @bot.tree.command(name='remove_dupes', description='🧹 Remove duplicate songs from queue')
-@bot.command(name='remove_dupes')
 async def remove_dupes(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id not in bot.queues or len(bot.queues[guild_id]) < 2:
@@ -1530,7 +1466,6 @@ async def remove_dupes(interaction: discord.Interaction):
     await interaction.response.send_message(f"🧹 **Removed {removed} duplicates**")
 
 @bot.tree.command(name='queue_length', description='📏 Show total queue duration')
-@bot.command(name='queue_length')
 async def queue_length(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id not in bot.queues or len(bot.queues[guild_id]) == 0:
@@ -1542,7 +1477,6 @@ async def queue_length(interaction: discord.Interaction):
 
 @bot.tree.command(name='queue_save', description='💾 Save current queue as a playlist')
 @app_commands.describe(name='Playlist name')
-@bot.command(name='queue_save')
 async def queue_save(interaction: discord.Interaction, name: str):
     guild_id = interaction.guild_id
     user_id = interaction.user.id
@@ -1562,12 +1496,10 @@ async def queue_save(interaction: discord.Interaction, name: str):
     await interaction.response.send_message(f"💾 **Queue saved as playlist:** '{name}' ({len(bot.queues[guild_id])} songs)")
 
 @bot.tree.command(name='autoplay', description='🔁 Toggle autoplay (auto-add similar songs)')
-@bot.command(name='autoplay')
 async def autoplay(interaction: discord.Interaction):
     await interaction.response.send_message("🔁 **Autoplay:** Feature coming soon!")
 
 @bot.tree.command(name='grab', description='📥 Save current song info to DMs')
-@bot.command(name='grab')
 async def grab(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id not in bot.now_playing:
@@ -1582,7 +1514,6 @@ async def grab(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Could not DM you (DMs disabled)", ephemeral=True)
 
 @bot.tree.command(name='voteskip', description='🗳 Vote to skip the current song')
-@bot.command(name='voteskip')
 async def voteskip(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
@@ -1598,7 +1529,6 @@ async def voteskip(interaction: discord.Interaction):
         await interaction.response.send_message("❌ You must be in the same voice channel", ephemeral=True)
 
 @bot.tree.command(name='forceskip', description='⏭ Force skip (admin only)')
-@bot.command(name='forceskip')
 async def forceskip(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.manage_messages:
         await interaction.response.send_message("❌ You need `Manage Messages` permission", ephemeral=True)
@@ -1606,7 +1536,6 @@ async def forceskip(interaction: discord.Interaction):
     await skip.callback(interaction)
 
 @bot.tree.command(name='pause_all', description='⏸ Pause music in multiple servers (bot owner only)')
-@bot.command(name='pause_all')
 async def pause_all(interaction: discord.Interaction):
     if interaction.user.id != bot.application.owner.id:
         await interaction.response.send_message("❌ Bot owner only", ephemeral=True)
@@ -1621,7 +1550,6 @@ async def pause_all(interaction: discord.Interaction):
     await interaction.response.send_message(f"⏸ **Paused** in {paused} servers")
 
 @bot.tree.command(name='resume_all', description='▶️ Resume music in all servers (bot owner only)')
-@bot.command(name='resume_all')
 async def resume_all(interaction: discord.Interaction):
     if interaction.user.id != bot.application.owner.id:
         await interaction.response.send_message("❌ Bot owner only", ephemeral=True)
@@ -1637,7 +1565,6 @@ async def resume_all(interaction: discord.Interaction):
 
 @bot.tree.command(name='clean', description='🧹 Remove bot messages from the channel')
 @app_commands.describe(count='Number of messages to clean')
-@bot.command(name='clean')
 async def clean(interaction: discord.Interaction, count: int = 10):
     if not interaction.user.guild_permissions.manage_messages:
         await interaction.response.send_message("❌ You need `Manage Messages` permission", ephemeral=True)
@@ -1653,7 +1580,6 @@ async def clean(interaction: discord.Interaction, count: int = 10):
 
 # ===== 81-90. MORE COMMANDS =====
 @bot.tree.command(name='maintenance', description='🔧 Toggle maintenance mode (admin)')
-@bot.command(name='maintenance')
 @app_commands.choices(mode=[
     app_commands.Choice(name='ON', value='on'),
     app_commands.Choice(name='OFF', value='off')
@@ -1665,7 +1591,6 @@ async def maintenance(interaction: discord.Interaction, mode: str):
     await interaction.response.send_message(f"🔧 **Maintenance:** {mode.upper()}")
 
 @bot.tree.command(name='reset', description='🔄 Reset the queue and player for this server')
-@bot.command(name='reset')
 async def reset(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
@@ -1681,7 +1606,6 @@ async def reset(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Not connected", ephemeral=True)
 
 @bot.tree.command(name='recent', description='🕐 Show recently played songs (global)')
-@bot.command(name='recent')
 async def recent(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id not in bot.history or len(bot.history[guild_id]) == 0:
@@ -1697,7 +1621,6 @@ async def recent(interaction: discord.Interaction):
 
 # ===== 77-100. EXTRA SLASH COMMANDS =====
 @bot.tree.command(name='status', description='📊 Show current player status')
-@bot.command(name='status')
 async def status(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
@@ -1710,7 +1633,6 @@ async def status(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name='queue_first', description='⬆️ Move the first queued song to the front')
-@bot.command(name='queue_first')
 async def queue_first(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     q = bot.queues.get(guild_id, [])
@@ -1720,7 +1642,6 @@ async def queue_first(interaction: discord.Interaction):
     await interaction.response.send_message(f"⬆️ First queued song: **{song['title']}**")
 
 @bot.tree.command(name='queue_last', description='⬇️ Show the last queued song')
-@bot.command(name='queue_last')
 async def queue_last(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     q = bot.queues.get(guild_id, [])
@@ -1729,7 +1650,6 @@ async def queue_last(interaction: discord.Interaction):
     await interaction.response.send_message(f"⬇️ Last queued song: **{q[-1]['title']}**")
 
 @bot.tree.command(name='queue_reverse', description='🔃 Reverse the queue')
-@bot.command(name='queue_reverse')
 async def queue_reverse(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     q = bot.queues.get(guild_id, [])
@@ -1739,7 +1659,6 @@ async def queue_reverse(interaction: discord.Interaction):
     await interaction.response.send_message("🔃 **Queue reversed**")
 
 @bot.tree.command(name='queue_random', description='🎲 Shuffle the queue once')
-@bot.command(name='queue_random')
 async def queue_random(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     q = bot.queues.get(guild_id, [])
@@ -1749,17 +1668,14 @@ async def queue_random(interaction: discord.Interaction):
     await interaction.response.send_message("🎲 **Queue randomized**")
 
 @bot.tree.command(name='loop_status', description='🔄 Show current loop mode')
-@bot.command(name='loop_status')
 async def loop_status(interaction: discord.Interaction):
     await interaction.response.send_message(f"🔄 **Loop:** {bot.loop_mode.get(interaction.guild_id, 'none')}")
 
 @bot.tree.command(name='shuffle_status', description='🔀 Show shuffle status')
-@bot.command(name='shuffle_status')
 async def shuffle_status(interaction: discord.Interaction):
     await interaction.response.send_message(f"🔀 **Shuffle:** {'ON' if bot.shuffle_mode.get(interaction.guild_id, False) else 'OFF'}")
 
 @bot.tree.command(name='voice_status', description='🎧 Show voice connection status')
-@bot.command(name='voice_status')
 async def voice_status(interaction: discord.Interaction):
     vc = get_vc(interaction.guild_id)
     if not vc or not vc.is_connected():
@@ -1768,7 +1684,6 @@ async def voice_status(interaction: discord.Interaction):
         await interaction.response.send_message(f"🎧 Connected to **{vc.channel.name}**")
 
 @bot.tree.command(name='botinfo', description='🤖 Show bot information')
-@bot.command(name='botinfo')
 async def botinfo(interaction: discord.Interaction):
     await interaction.response.send_message(
         f"🤖 **{bot.user.name if bot.user else 'Music Bot'}**\n"
@@ -1777,35 +1692,29 @@ async def botinfo(interaction: discord.Interaction):
     )
 
 @bot.tree.command(name='membercount', description='👥 Show server member count')
-@bot.command(name='membercount')
 async def membercount(interaction: discord.Interaction):
     await interaction.response.send_message(f"👥 **Members:** `{interaction.guild.member_count}`")
 
 @bot.tree.command(name='channelcount', description='📺 Show server channel count')
-@bot.command(name='channelcount')
 async def channelcount(interaction: discord.Interaction):
     await interaction.response.send_message(f"📺 **Channels:** `{len(interaction.guild.channels)}`")
 
 @bot.tree.command(name='rolecount', description='🏷 Show server role count')
-@bot.command(name='rolecount')
 async def rolecount(interaction: discord.Interaction):
     await interaction.response.send_message(f"🏷 **Roles:** `{len(interaction.guild.roles)}`")
 
 @bot.tree.command(name='history_clear', description='🧹 Clear this server playback history')
-@bot.command(name='history_clear')
 async def history_clear(interaction: discord.Interaction):
     bot.history[interaction.guild_id] = []
     await interaction.response.send_message("🧹 **Playback history cleared**")
 
 @bot.tree.command(name='favorites_clear', description='🧹 Clear your favorites')
-@bot.command(name='favorites_clear')
 async def favorites_clear(interaction: discord.Interaction):
     bot.favorites[interaction.user.id] = []
     await interaction.response.send_message("🧹 **Your favorites were cleared**", ephemeral=True)
 
 @bot.tree.command(name='playlist_clear', description='🧹 Clear a playlist')
 @app_commands.describe(name='Playlist name')
-@bot.command(name='playlist_clear')
 async def playlist_clear(interaction: discord.Interaction, name: str):
     playlists = bot.playlists.get(interaction.user.id, {})
     if name not in playlists:
@@ -1814,37 +1723,31 @@ async def playlist_clear(interaction: discord.Interaction, name: str):
     await interaction.response.send_message(f"🧹 **Playlist cleared:** '{name}'")
 
 @bot.tree.command(name='playlist_count', description='📁 Show number of your playlists')
-@bot.command(name='playlist_count')
 async def playlist_count(interaction: discord.Interaction):
     count = len(bot.playlists.get(interaction.user.id, {}))
     await interaction.response.send_message(f"📁 **Playlists:** `{count}`", ephemeral=True)
 
 @bot.tree.command(name='favorite_count', description='⭐ Show number of your favorites')
-@bot.command(name='favorite_count')
 async def favorite_count(interaction: discord.Interaction):
     count = len(bot.favorites.get(interaction.user.id, []))
     await interaction.response.send_message(f"⭐ **Favorites:** `{count}`", ephemeral=True)
 
 @bot.tree.command(name='queue_count', description='📋 Show number of queued songs')
-@bot.command(name='queue_count')
 async def queue_count(interaction: discord.Interaction):
     count = len(bot.queues.get(interaction.guild_id, []))
     await interaction.response.send_message(f"📋 **Queued songs:** `{count}`")
 
 @bot.tree.command(name='clear_nowplaying', description='🧹 Clear current-song display')
-@bot.command(name='clear_nowplaying')
 async def clear_nowplaying(interaction: discord.Interaction):
     bot.now_playing.pop(interaction.guild_id, None)
     await interaction.response.send_message("🧹 **Current-song display cleared**")
 
 @bot.tree.command(name='loop_off', description='❌ Turn loop off')
-@bot.command(name='loop_off')
 async def loop_off(interaction: discord.Interaction):
     bot.loop_mode[interaction.guild_id] = 'none'
     await interaction.response.send_message("❌ **Loop disabled**")
 
 @bot.tree.command(name='shuffle_on', description='🔀 Turn shuffle on')
-@bot.command(name='shuffle_on')
 async def shuffle_on(interaction: discord.Interaction):
     bot.shuffle_mode[interaction.guild_id] = True
     q = bot.queues.get(interaction.guild_id)
@@ -1853,19 +1756,16 @@ async def shuffle_on(interaction: discord.Interaction):
     await interaction.response.send_message("🔀 **Shuffle enabled**")
 
 @bot.tree.command(name='shuffle_off', description='➡️ Turn shuffle off')
-@bot.command(name='shuffle_off')
 async def shuffle_off(interaction: discord.Interaction):
     bot.shuffle_mode[interaction.guild_id] = False
     await interaction.response.send_message("➡️ **Shuffle disabled**")
 
 @bot.tree.command(name='queue_clear_after', description='🧹 Clear all queued songs after the current one')
-@bot.command(name='queue_clear_after')
 async def queue_clear_after(interaction: discord.Interaction):
     bot.queues[interaction.guild_id] = []
     await interaction.response.send_message("🧹 **Upcoming queue cleared**")
 
 @bot.tree.command(name='volume_reset', description='🔊 Reset volume to default')
-@bot.command(name='volume_reset')
 async def volume_reset(interaction: discord.Interaction):
     vc = get_vc(interaction.guild_id)
     if not vc or not vc.source or not hasattr(vc.source, 'volume'):
@@ -1874,9 +1774,25 @@ async def volume_reset(interaction: discord.Interaction):
     await interaction.response.send_message(f"🔊 **Volume reset:** `{int(DEFAULT_VOLUME * 100)}%`")
 
 @bot.tree.command(name='uptime_seconds', description='⏱ Show uptime in seconds')
-@bot.command(name='uptime_seconds')
 async def uptime_seconds(interaction: discord.Interaction):
     await interaction.response.send_message(f"⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds")
+
+# ---------------------------------------------------------------------------
+# Register prefix aliases AFTER slash callbacks have been created.
+# Do not stack @bot.command on a @bot.tree.command callback: discord.py then
+# replaces the coroutine with a Command object and the slash command fails.
+# ---------------------------------------------------------------------------
+def _register_prefix_aliases():
+    for slash in bot.tree.get_commands():
+        if bot.get_command(slash.name) is not None:
+            continue
+        callback = slash.callback
+        async def prefix_callback(ctx, *args, _callback=callback):
+            return await _callback(ctx, *args)
+        bot.add_command(commands.Command(prefix_callback, name=slash.name,
+                                          help=slash.description))
+
+_register_prefix_aliases()
 
 if __name__ == '__main__':
     # Fly.io health endpoint.  Flask runs in a background thread while the
