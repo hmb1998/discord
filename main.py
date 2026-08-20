@@ -7,6 +7,7 @@ import re
 import requests
 import zipfile
 import io
+from aiohttp import web
 from config import TOKEN, GITHUB_FILES_URL, BOT_PREFIX, DEFAULT_VOLUME
 
 intents = discord.Intents.default()
@@ -110,10 +111,24 @@ async def play_next_message(ctx):
         except:
             pass
 
+# Web server for UptimeRobot
+async def handle_ping(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.add_routes([web.get('/', handle_ping)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    print("🌐 Web server started on port 8080")
+
 @bot.event
 async def on_ready():
     activity = discord.Activity(type=discord.ActivityType.listening, name="!hmb")
     await bot.change_presence(activity=activity)
+    await start_web_server()
     print(f'✅ Bot is ready! Logged in as {bot.user}')
 
 # ============================================================
@@ -170,7 +185,7 @@ class SongSearchModal(discord.ui.Modal, title="🔍 Search or Play Song"):
             await interaction.followup.send(f"✅ **Added to queue:** {song['title']} (Position #{position})", ephemeral=True)
 
         embed = await self.view_instance.update_embed()
-        await self.view_instance.message.edit(embed=embed)
+        await self.message.edit(embed=embed)
 
 
 # ============================================================
