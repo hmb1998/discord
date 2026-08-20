@@ -344,7 +344,7 @@ if __name__ == "__main__":
     if not TOKEN:
         exit(1)
     
-    # داگیرکردنی پۆرتەکە لە تریدێکی جیاوازدا بە فڵەسک بۆ ئەوەی هەمیشە کاربکات
+    # دەستپێکردنی وێب سەروەری فڵەسک لە تریدێکی جیاوازدا
     t = threading.Thread(target=run_flask, daemon=True)
     t.start()
 
