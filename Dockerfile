@@ -19,5 +19,5 @@ COPY . .
 # Create downloads directory
 RUN mkdir -p downloads
 
-# Run the bot
+# Run the application (using Gunicorn for Flask & Bot in background if configured, or python main.py)
 CMD ["python", "main.py"]
