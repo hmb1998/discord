@@ -16,7 +16,7 @@ A Discord music bot that plays audio from YouTube and supports **both slash comm
 
 ## Commands
 
-The project contains **101 slash commands** and the same **101 commands with `!`**.
+The project contains **100 slash commands** (Discord's top-level limit) and **101 commands with `!`**. The extra `!uptime_seconds` command is prefix-only.
 
 Examples:
 

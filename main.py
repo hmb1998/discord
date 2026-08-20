@@ -1773,24 +1773,68 @@ async def volume_reset(interaction: discord.Interaction):
     vc.source.volume = DEFAULT_VOLUME
     await interaction.response.send_message(f"🔊 **Volume reset:** `{int(DEFAULT_VOLUME * 100)}%`")
 
-@bot.tree.command(name='uptime_seconds', description='⏱ Show uptime in seconds')
 async def uptime_seconds(interaction: discord.Interaction):
     await interaction.response.send_message(f"⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds")
 
 # ---------------------------------------------------------------------------
-# Register prefix aliases AFTER slash callbacks have been created.
-# Do not stack @bot.command on a @bot.tree.command callback: discord.py then
-# replaces the coroutine with a Command object and the slash command fails.
+# Prefix aliases
+# Discord allows at most 100 top-level slash commands. This bot has 101
+# commands, so uptime_seconds is intentionally prefix-only; all 101 remain
+# available with the ! prefix.
+#
+# We use a small adapter so the same callbacks can be called from both slash
+# interactions and prefix-command contexts without stacking decorators.
 # ---------------------------------------------------------------------------
+class _PrefixResponse:
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    async def send_message(self, content=None, **kwargs):
+        kwargs.pop('ephemeral', None)
+        return await self.ctx.send(content, **kwargs)
+
+    async def defer(self, **kwargs):
+        return None
+
+class _PrefixFollowup:
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    async def send(self, content=None, **kwargs):
+        kwargs.pop('ephemeral', None)
+        return await self.ctx.send(content, **kwargs)
+
+class _PrefixInteraction:
+    def __init__(self, ctx):
+        self._ctx = ctx
+        self.user = ctx.author
+        self.guild = ctx.guild
+        self.guild_id = ctx.guild.id if ctx.guild else None
+        self.channel = ctx.channel
+        self.response = _PrefixResponse(ctx)
+        self.followup = _PrefixFollowup(ctx)
+
 def _register_prefix_aliases():
     for slash in bot.tree.get_commands():
         if bot.get_command(slash.name) is not None:
             continue
         callback = slash.callback
+
         async def prefix_callback(ctx, *args, _callback=callback):
-            return await _callback(ctx, *args)
-        bot.add_command(commands.Command(prefix_callback, name=slash.name,
-                                          help=slash.description))
+            interaction = _PrefixInteraction(ctx)
+            return await _callback(interaction, *args)
+
+        bot.add_command(commands.Command(
+            prefix_callback, name=slash.name, help=slash.description
+        ))
+
+    async def uptime_prefix(ctx):
+        await ctx.send(f"⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds")
+
+    if bot.get_command('uptime_seconds') is None:
+        bot.add_command(commands.Command(
+            uptime_prefix, name='uptime_seconds', help='⏱ Show uptime in seconds'
+        ))
 
 _register_prefix_aliases()
 
