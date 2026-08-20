@@ -108,7 +108,7 @@ async def play_next_message(ctx):
         except:
             pass
 
-# Dummy web server to satisfy Fly.io health checks immediately
+# Instant Web Server for Fly.io health checks
 async def handle_ping(request):
     return web.Response(text="OK")
 
@@ -119,7 +119,7 @@ async def start_web_server():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8080)
     await site.start()
-    print("🌐 Web server started on port 8080")
+    print("🌐 Web server successfully started and listening on port 8080")
 
 @bot.event
 async def on_ready():
@@ -346,10 +346,9 @@ async def hmb(ctx):
     view.on_timeout = disable_buttons
 
 async def main():
-    # دەستپێکردنی سێرვەری وێب و بۆتەکە پێکەوە بە بێ کێشە
-    server_task = asyncio.create_task(start_web_server())
-    bot_task = asyncio.create_task(bot.start(TOKEN))
-    await asyncio.gather(server_task, bot_task)
+    # دەستپێکردنی سێرڤەری وێب و پاشان چاوەڕێکردن بۆ خێرایی کارکردن
+    await start_web_server()
+    await bot.start(TOKEN)
 
 if __name__ == "__main__":
     if not TOKEN:
