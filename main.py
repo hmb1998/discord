@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is running!"
+    return "Bot is running and alive!"
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -335,16 +335,10 @@ async def hmb(ctx):
             child.disabled = True
     view.on_timeout = disable_buttons
 
-async def main():
-    import threading
-    # ڕاگرتنی فڵەسک لە پاشبنەمادا بە شێوازێکی جێگیر
-    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False)).start()
-    await bot.start(TOKEN)
+# دەستپێکردنی بۆتەکە لە پشتەوە کاتێک Gunicorn فڵەسک بەڕێوەدەبات
+import threading
+def run_bot():
+    if TOKEN:
+        bot.run(TOKEN)
 
-if __name__ == "__main__":
-    if not TOKEN:
-        exit(1)
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+threading.Thread(target=run_bot, daemon=True).start()
