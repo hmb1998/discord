@@ -49,34 +49,48 @@ class MusicBot(commands.Bot):
 bot = MusicBot()
 bot.remove_command('help')
 
-# Rich Presence configuration. The asset key is the key shown for the
-# uploaded image in Discord Developer Portal -> Rich Presence -> Assets.
+# Rich Presence configuration.
+# The asset key must match the key shown by Discord Developer Portal ->
+# Rich Presence -> Assets. Fly.io reads it from the ASSET_KEY secret.
 _presence_initialized = False
+
+async def set_hmb_presence():
+    """Set the bot's Discord activity and Rich Presence image."""
+    global _presence_initialized
+    try:
+        asset_key = RICH_PRESENCE_ASSET_KEY.strip()
+        if not asset_key:
+            raise RuntimeError("ASSET_KEY/RICH_PRESENCE_ASSET_KEY is empty")
+
+        activity_kwargs = {
+            "type": discord.ActivityType.listening,
+            "name": "HMB GLOBAL",
+            "details": "High-quality Music • Queue • Playlists",
+            "state": "🎵 24/7 Music Experience",
+            "assets": {
+                "large_image": asset_key,
+                "large_text": "HMB GLOBAL — Discord Music Bot",
+                "small_image": asset_key,
+                "small_text": "🎵 HMB GLOBAL",
+            },
+        }
+        if bot.application_id:
+            activity_kwargs["application_id"] = bot.application_id
+
+        activity = discord.Activity(**activity_kwargs)
+        await bot.change_presence(status=discord.Status.online, activity=activity)
+        _presence_initialized = True
+        print(f"✅ Rich Presence enabled with asset: {asset_key}")
+    except Exception as exc:
+        _presence_initialized = False
+        print(f"⚠️ Rich Presence could not be enabled: {type(exc).__name__}: {exc}")
+
 
 @bot.event
 async def on_ready():
     global _presence_initialized
-    if _presence_initialized:
-        return
-    try:
-        activity = discord.Activity(
-            type=discord.ActivityType.listening,
-            name="HMB GLOBAL",
-            details="High-quality music • YouTube",
-            state="🎵 Queue • Playlists • Volume Control",
-            application_id=bot.application_id,
-            assets={
-                "large_image": RICH_PRESENCE_ASSET_KEY,
-                "large_text": "HMB GLOBAL — Music Bot",
-                "small_image": RICH_PRESENCE_ASSET_KEY,
-                "small_text": "🎵 Music is playing",
-            },
-        )
-        await bot.change_presence(status=discord.Status.online, activity=activity)
-        _presence_initialized = True
-        print(f"✅ Rich Presence enabled with asset: {RICH_PRESENCE_ASSET_KEY}")
-    except Exception as exc:
-        print(f"⚠️ Rich Presence could not be enabled: {exc}")
+    if not _presence_initialized:
+        await set_hmb_presence()
 
 
 # ---------------------------------------------------------------------------

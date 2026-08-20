@@ -97,3 +97,28 @@ fly deploy
 ```
 
 If Discord gives the image a new asset key after you re-upload it, replace the value of `ASSET_KEY` with the new key.
+
+
+## 🚀 HMB GLOBAL Rich Presence (Fly.io)
+
+This build is already wired to show the HMB GLOBAL Rich Presence when the bot connects.
+
+### Fly.io setup
+
+1. In **Discord Developer Portal → Rich Presence → Assets**, upload the HMB GLOBAL image.
+2. Copy the asset key shown for that image. The supplied build currently uses:
+   `file_0000000049881f49ef3a3b0cb7cdf84`
+3. In Fly.io → **Secrets**, create/update:
+   - **Name:** `ASSET_KEY`
+   - **Secret:** `file_0000000049881f49ef3a3b0cb7cdf84`
+4. Click **Set secret**.
+5. Click **Deploy Secrets** (or run `fly deploy`).
+6. Check Logs. A successful startup prints:
+   `✅ Rich Presence enabled with asset: ...`
+
+### Important
+
+- `ASSET_KEY` is **not** the Discord bot token.
+- Never put `DISCORD_TOKEN` in source code or GitHub.
+- The Discord Developer Portal **Rich Presence Visualizer is only a preview**; the bot code sends the activity.
+- If you delete/re-upload the image, Discord may give it a different asset key. Update `ASSET_KEY` and deploy again.
