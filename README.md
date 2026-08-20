@@ -78,3 +78,8 @@ The included `Dockerfile` installs FFmpeg. The included `fly.toml` exposes port 
 
 ### Prefix command fix
 The 100 slash commands are kept within Discord's top-level slash-command limit. `!` commands call the same slash callbacks directly, and `!uptime_seconds` remains prefix-only. This avoids duplicate registration and the `command function must be a coroutine function` / 100-command-limit startup errors.
+
+
+## Rich Presence Assets
+
+This build sets the bot activity to **Listening to HMB GLOBAL** and references the uploaded Rich Presence asset using `RICH_PRESENCE_ASSET_KEY`. The default key is the asset key visible in the supplied Developer Portal screenshot. If you rename/re-upload the asset, update the environment variable in Fly.io.

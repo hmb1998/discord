@@ -12,7 +12,7 @@ import time
 import datetime
 from typing import Optional
 from flask import Flask
-from config import TOKEN, DEFAULT_VOLUME
+from config import TOKEN, DEFAULT_VOLUME, RICH_PRESENCE_ASSET_KEY
 
 app = Flask(__name__)
 
@@ -48,6 +48,36 @@ class MusicBot(commands.Bot):
 
 bot = MusicBot()
 bot.remove_command('help')
+
+# Rich Presence configuration. The asset key is the key shown for the
+# uploaded image in Discord Developer Portal -> Rich Presence -> Assets.
+_presence_initialized = False
+
+@bot.event
+async def on_ready():
+    global _presence_initialized
+    if _presence_initialized:
+        return
+    try:
+        activity = discord.Activity(
+            type=discord.ActivityType.listening,
+            name="HMB GLOBAL",
+            details="High-quality music • YouTube",
+            state="🎵 Queue • Playlists • Volume Control",
+            application_id=bot.application_id,
+            assets={
+                "large_image": RICH_PRESENCE_ASSET_KEY,
+                "large_text": "HMB GLOBAL — Music Bot",
+                "small_image": RICH_PRESENCE_ASSET_KEY,
+                "small_text": "🎵 Music is playing",
+            },
+        )
+        await bot.change_presence(status=discord.Status.online, activity=activity)
+        _presence_initialized = True
+        print(f"✅ Rich Presence enabled with asset: {RICH_PRESENCE_ASSET_KEY}")
+    except Exception as exc:
+        print(f"⚠️ Rich Presence could not be enabled: {exc}")
+
 
 # ---------------------------------------------------------------------------
 # Prefix-command bridge
