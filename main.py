@@ -108,7 +108,7 @@ async def play_next_message(ctx):
         except:
             pass
 
-# Instant Web server response for Fly.io
+# Web server for Fly.io health checks
 async def handle_ping(request):
     return web.Response(text="OK")
 
@@ -370,8 +370,10 @@ async def hmb(ctx):
 
 
 async def main():
-    await start_web_server()
-    await bot.start(TOKEN)
+    await asyncio.gather(
+        start_web_server(),
+        bot.start(TOKEN)
+    )
 
 if __name__ == "__main__":
     if not TOKEN:
