@@ -1,25 +1,12 @@
-app = "discord-esjwfw"
-primary_region = "fra"
+app = 'discord-esjwfw'
+primary_region = 'fra'
 
 [build]
 
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = false
-  auto_start_machines = true
-  min_machines_running = 1
+[processes]
+  app = 'python main.py'
 
 [[services]]
-  protocol = "tcp"
+  protocol = 'tcp'
   internal_port = 8080
-  [services.concurrency]
-    type = "requests"
-    soft_limit = 200
-    hard_limit = 250
-  [[services.http_checks]]
-    interval = "10s"
-    timeout = "2s"
-    grace_period = "5s"
-    method = "GET"
-    path = "/"
+  # ئەگەر هێلت چێکی هەیە لێرە دەتوانرێت لاببرێت یان پڕۆسەکە تەنها وەک background process دابنرێت
