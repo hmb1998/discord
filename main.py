@@ -12,13 +12,16 @@ import time
 import datetime
 from typing import Optional
 from flask import Flask
-from config import TOKEN, DEFAULT_VOLUME, RICH_PRESENCE_ASSET_KEY
+from config import TOKEN, DEFAULT_VOLUME
+
+# Discord Rich Presence asset key
+ASSET_KEY = os.getenv("ASSET_KEY", "file_00000000049881f49ef3a3b0cb7cdf84")
 
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Discord Music Bot is online — 100 slash commands + ! prefix aliases."
+    return "Bot is running perfectly with 100+ Slash Commands!"
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -26,7 +29,7 @@ intents.voice_states = True
 
 class MusicBot(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix='!', intents=intents, case_insensitive=True)
+        super().__init__(command_prefix='!', intents=intents)
         self.queues = {}
         self.custom_voice_clients = {}
         self.now_playing = {}
@@ -48,186 +51,6 @@ class MusicBot(commands.Bot):
 
 bot = MusicBot()
 bot.remove_command('help')
-
-# Rich Presence configuration. The asset key is the key shown for the
-# uploaded image in Discord Developer Portal -> Rich Presence -> Assets.
-_presence_initialized = False
-
-@bot.event
-async def on_ready():
-    global _presence_initialized
-    if _presence_initialized:
-        return
-    try:
-        activity = discord.Activity(
-            type=discord.ActivityType.listening,
-            name="HMB GLOBAL",
-            details="High-quality music • YouTube",
-            state="🎵 Queue • Playlists • Volume Control",
-            application_id=bot.application_id,
-            assets={
-                "large_image": RICH_PRESENCE_ASSET_KEY,
-                "large_text": "HMB GLOBAL — Music Bot",
-                "small_image": RICH_PRESENCE_ASSET_KEY,
-                "small_text": "🎵 Music is playing",
-            },
-        )
-        await bot.change_presence(status=discord.Status.online, activity=activity)
-        _presence_initialized = True
-        print(f"✅ Rich Presence enabled with asset: {RICH_PRESENCE_ASSET_KEY}")
-    except Exception as exc:
-        print(f"⚠️ Rich Presence could not be enabled: {exc}")
-
-
-# ---------------------------------------------------------------------------
-# Prefix-command bridge
-# ---------------------------------------------------------------------------
-# Every command in this project is registered as a Discord slash command and
-# also as a legacy command.  The callbacks are written against Interaction,
-# so this small adapter lets the same callback work with !prefix messages too.
-class _PrefixResponse:
-    def __init__(self, ctx):
-        self.ctx = ctx
-        self._done = False
-
-    @property
-    def is_done(self):
-        return self._done
-
-    async def send_message(self, content=None, *, embed=None, embeds=None,
-                           ephemeral=False, **kwargs):
-        self._done = True
-        kwargs.pop('ephemeral', None)
-        if content is not None:
-            return await self.ctx.send(content, embed=embed, embeds=embeds, **kwargs)
-        return await self.ctx.send(embed=embed, embeds=embeds, **kwargs)
-
-    async def defer(self, *, ephemeral=False, thinking=True):
-        # Prefix messages do not need an interaction acknowledgement.
-        self._done = True
-
-class _PrefixFollowup:
-    def __init__(self, ctx):
-        self.ctx = ctx
-
-    async def send(self, content=None, *, embed=None, embeds=None,
-                   ephemeral=False, **kwargs):
-        kwargs.pop('ephemeral', None)
-        if content is not None:
-            return await self.ctx.send(content, embed=embed, embeds=embeds, **kwargs)
-        return await self.ctx.send(embed=embed, embeds=embeds, **kwargs)
-
-class PrefixInteraction:
-    def __init__(self, ctx):
-        self._ctx = ctx
-        self.user = ctx.author
-        self.guild = ctx.guild
-        self.guild_id = ctx.guild.id if ctx.guild else None
-        self.channel = ctx.channel
-        self.message = ctx.message
-        self.response = _PrefixResponse(ctx)
-        self.followup = _PrefixFollowup(ctx)
-
-async def _convert_prefix_arg(ctx, annotation, token):
-    """Convert common slash-command annotations to prefix arguments."""
-    ann = str(annotation).replace('typing.', '')
-    if 'Optional[' in ann:
-        inner = ann.split('Optional[', 1)[1].rsplit(']', 1)[0]
-        if token is None:
-            return None
-        ann = inner
-    if token is None:
-        return None
-    if ann == 'int':
-        return int(token)
-    if ann == 'float':
-        return float(token)
-    if ann == 'bool':
-        value = token.lower()
-        if value in ('1', 'true', 'yes', 'on', 'enable', 'enabled'):
-            return True
-        if value in ('0', 'false', 'no', 'off', 'disable', 'disabled'):
-            return False
-        raise ValueError('Use true/false for this option.')
-    if ann in ('discord.User', 'discord.Member'):
-        return await commands.UserConverter().convert(ctx, token)
-    return token
-
-async def dispatch_prefix_command(message):
-    if message.author.bot or not message.content.startswith('!'):
-        return False
-
-    import shlex
-    try:
-        parts = shlex.split(message.content[1:])
-    except ValueError:
-        parts = message.content[1:].split()
-    if not parts:
-        return False
-
-    name = parts.pop(0).lower()
-    # Use the slash-command callback directly for prefix aliases.
-    # This avoids registering a second copy of every command with discord.py.
-    if name == 'uptime_seconds':
-        await message.channel.send(
-            f'⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds'
-        )
-        return True
-
-    slash_command = next(
-        (cmd for cmd in bot.tree.get_commands() if cmd.name == name),
-        None
-    )
-    if slash_command is None:
-        return False
-
-    callback = slash_command.callback
-    import inspect
-    ctx = await bot.get_context(message)
-    params = list(inspect.signature(callback).parameters.values())[1:]  # skip interaction
-    values = []
-    index = 0
-    try:
-        for p in params:
-            annotation = p.annotation
-            required = p.default is inspect._empty
-            if annotation is str and p.name in ('query', 'song', 'name', 'category', 'station', 'preset', 'time', 'mode'):
-                if index < len(parts):
-                    token = ' '.join(parts[index:])
-                    index = len(parts)
-                elif required:
-                    raise ValueError(f'Missing argument: {p.name}')
-                else:
-                    token = None
-            elif index < len(parts):
-                token = parts[index]
-                index += 1
-            elif required:
-                raise ValueError(f'Missing argument: {p.name}')
-            else:
-                token = None
-
-            if token is None and p.default is not inspect._empty:
-                values.append(p.default)
-            else:
-                values.append(await _convert_prefix_arg(ctx, annotation, token))
-
-        await callback(PrefixInteraction(ctx), *values)
-    except (ValueError, TypeError) as exc:
-        await message.channel.send(f'❌ `{name}`: {exc}')
-    except commands.CommandError as exc:
-        await message.channel.send(f'❌ `{name}`: {exc}')
-    except Exception as exc:
-        print(f'Prefix command {name!r} error: {exc}')
-        await message.channel.send(f'❌ Command failed: `{type(exc).__name__}`')
-    return True
-
-@bot.event
-async def on_message(message):
-    if await dispatch_prefix_command(message):
-        return
-    # Do not call process_commands here: the callbacks above are already
-    # invoked through PrefixInteraction, preventing Context/Interaction mixups.
 
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin',
@@ -283,17 +106,13 @@ async def get_voice_client(ctx_or_interaction):
         user = ctx_or_interaction.user
         guild = ctx_or_interaction.guild
         respond = ctx_or_interaction.response.send_message
-        response_kwargs = {"ephemeral": True}
     else:
-        # PrefixInteraction / commands.Context do not support the Discord
-        # interaction-only ``ephemeral`` keyword.
-        user = ctx_or_interaction.author if hasattr(ctx_or_interaction, "author") else ctx_or_interaction.user
+        user = ctx_or_interaction.author
         guild = ctx_or_interaction.guild
-        respond = ctx_or_interaction.send if hasattr(ctx_or_interaction, "send") else ctx_or_interaction.response.send_message
-        response_kwargs = {}
+        respond = ctx_or_interaction.send
 
     if not user.voice:
-        await respond("❌ You must be in a voice channel first!", **response_kwargs)
+        await respond("❌ You must be in a voice channel first!", ephemeral=True)
         return None, None
     
     voice_channel = user.voice.channel
@@ -308,7 +127,7 @@ async def get_voice_client(ctx_or_interaction):
             vc = await voice_channel.connect()
             bot.custom_voice_clients[guild_id] = vc
         except Exception as e:
-            await respond(f"❌ Could not connect: {str(e)[:100]}", **response_kwargs)
+            await respond(f"❌ Could not connect: {str(e)[:100]}", ephemeral=True)
             return None, None
     
     return vc, respond
@@ -377,7 +196,11 @@ async def play_next(guild_id):
 
 @bot.event
 async def on_ready():
-    activity = discord.Activity(type=discord.ActivityType.listening, name="!play | /play | 100 Slash Commands + ! Prefix Commands")
+    activity = discord.Activity(
+        type=discord.ActivityType.listening,
+        name="/play | 100+ Commands",
+        assets={"large_image": ASSET_KEY}
+    )
     await bot.change_presence(activity=activity)
     print(f'✅ Bot is ready! Logged in as {bot.user}')
 
@@ -608,7 +431,7 @@ async def nowplaying(interaction: discord.Interaction, ephemeral: Optional[bool]
     vc = get_vc(guild_id)
     
     embed = discord.Embed(title="🎶 Now Playing", color=discord.Color.green())
-    embed.add_field(name="Title", value=f"[{song['title']}]({song['url']})")
+    embed.add_field(name="Title", value=f"[{song['title']}]({song['url'])")
     embed.add_field(name="Duration", value=format_time(song['duration']))
     embed.add_field(name="Channel", value=song.get('channel', 'Unknown'))
     
@@ -1660,174 +1483,4 @@ async def recent(interaction: discord.Interaction):
     recent_songs = bot.history[guild_id][-5:]
     embed = discord.Embed(title="🕐 Recently Played", color=discord.Color.dark_blue())
     for i, s in enumerate(reversed(recent_songs), 1):
-        embed.add_field(name=f"`{i}.` {s['title'][:80]}", value=f"⏱ {format_time(s.get('duration', 0))}", inline=False)
-    await interaction.response.send_message(embed=embed)
-
-
-# ===== 77-100. EXTRA SLASH COMMANDS =====
-@bot.tree.command(name='status', description='📊 Show current player status')
-async def status(interaction: discord.Interaction):
-    guild_id = interaction.guild_id
-    vc = get_vc(guild_id)
-    song = bot.now_playing.get(guild_id)
-    embed = discord.Embed(title="📊 Player Status", color=discord.Color.blurple())
-    embed.add_field(name="Voice", value=vc.channel.name if vc and vc.is_connected() else "Not connected", inline=True)
-    embed.add_field(name="Playback", value="▶️ Playing" if vc and vc.is_playing() else "⏸ Paused" if vc and vc.is_paused() else "⏹ Stopped", inline=True)
-    embed.add_field(name="Queue", value=str(len(bot.queues.get(guild_id, []))), inline=True)
-    embed.add_field(name="Current", value=song['title'][:100] if song else "Nothing", inline=False)
-    await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name='queue_first', description='⬆️ Move the first queued song to the front')
-async def queue_first(interaction: discord.Interaction):
-    guild_id = interaction.guild_id
-    q = bot.queues.get(guild_id, [])
-    if not q:
-        await interaction.response.send_message("❌ Queue is empty", ephemeral=True); return
-    song = q[0]
-    await interaction.response.send_message(f"⬆️ First queued song: **{song['title']}**")
-
-@bot.tree.command(name='queue_last', description='⬇️ Show the last queued song')
-async def queue_last(interaction: discord.Interaction):
-    guild_id = interaction.guild_id
-    q = bot.queues.get(guild_id, [])
-    if not q:
-        await interaction.response.send_message("❌ Queue is empty", ephemeral=True); return
-    await interaction.response.send_message(f"⬇️ Last queued song: **{q[-1]['title']}**")
-
-@bot.tree.command(name='queue_reverse', description='🔃 Reverse the queue')
-async def queue_reverse(interaction: discord.Interaction):
-    guild_id = interaction.guild_id
-    q = bot.queues.get(guild_id, [])
-    if len(q) < 2:
-        await interaction.response.send_message("❌ Need at least 2 songs", ephemeral=True); return
-    q.reverse()
-    await interaction.response.send_message("🔃 **Queue reversed**")
-
-@bot.tree.command(name='queue_random', description='🎲 Shuffle the queue once')
-async def queue_random(interaction: discord.Interaction):
-    guild_id = interaction.guild_id
-    q = bot.queues.get(guild_id, [])
-    if len(q) < 2:
-        await interaction.response.send_message("❌ Need at least 2 songs", ephemeral=True); return
-    random.shuffle(q)
-    await interaction.response.send_message("🎲 **Queue randomized**")
-
-@bot.tree.command(name='loop_status', description='🔄 Show current loop mode')
-async def loop_status(interaction: discord.Interaction):
-    await interaction.response.send_message(f"🔄 **Loop:** {bot.loop_mode.get(interaction.guild_id, 'none')}")
-
-@bot.tree.command(name='shuffle_status', description='🔀 Show shuffle status')
-async def shuffle_status(interaction: discord.Interaction):
-    await interaction.response.send_message(f"🔀 **Shuffle:** {'ON' if bot.shuffle_mode.get(interaction.guild_id, False) else 'OFF'}")
-
-@bot.tree.command(name='voice_status', description='🎧 Show voice connection status')
-async def voice_status(interaction: discord.Interaction):
-    vc = get_vc(interaction.guild_id)
-    if not vc or not vc.is_connected():
-        await interaction.response.send_message("🎧 Not connected to a voice channel")
-    else:
-        await interaction.response.send_message(f"🎧 Connected to **{vc.channel.name}**")
-
-@bot.tree.command(name='botinfo', description='🤖 Show bot information')
-async def botinfo(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        f"🤖 **{bot.user.name if bot.user else 'Music Bot'}**\n"
-        f"Servers: `{len(bot.guilds)}`\nCommands: `{len(bot.tree.get_commands())}`\n"
-        f"Uptime: `{int(time.time() - bot.start_time)}s`"
-    )
-
-@bot.tree.command(name='membercount', description='👥 Show server member count')
-async def membercount(interaction: discord.Interaction):
-    await interaction.response.send_message(f"👥 **Members:** `{interaction.guild.member_count}`")
-
-@bot.tree.command(name='channelcount', description='📺 Show server channel count')
-async def channelcount(interaction: discord.Interaction):
-    await interaction.response.send_message(f"📺 **Channels:** `{len(interaction.guild.channels)}`")
-
-@bot.tree.command(name='rolecount', description='🏷 Show server role count')
-async def rolecount(interaction: discord.Interaction):
-    await interaction.response.send_message(f"🏷 **Roles:** `{len(interaction.guild.roles)}`")
-
-@bot.tree.command(name='history_clear', description='🧹 Clear this server playback history')
-async def history_clear(interaction: discord.Interaction):
-    bot.history[interaction.guild_id] = []
-    await interaction.response.send_message("🧹 **Playback history cleared**")
-
-@bot.tree.command(name='favorites_clear', description='🧹 Clear your favorites')
-async def favorites_clear(interaction: discord.Interaction):
-    bot.favorites[interaction.user.id] = []
-    await interaction.response.send_message("🧹 **Your favorites were cleared**", ephemeral=True)
-
-@bot.tree.command(name='playlist_clear', description='🧹 Clear a playlist')
-@app_commands.describe(name='Playlist name')
-async def playlist_clear(interaction: discord.Interaction, name: str):
-    playlists = bot.playlists.get(interaction.user.id, {})
-    if name not in playlists:
-        await interaction.response.send_message(f"❌ Playlist '{name}' not found", ephemeral=True); return
-    playlists[name] = []
-    await interaction.response.send_message(f"🧹 **Playlist cleared:** '{name}'")
-
-@bot.tree.command(name='playlist_count', description='📁 Show number of your playlists')
-async def playlist_count(interaction: discord.Interaction):
-    count = len(bot.playlists.get(interaction.user.id, {}))
-    await interaction.response.send_message(f"📁 **Playlists:** `{count}`", ephemeral=True)
-
-@bot.tree.command(name='favorite_count', description='⭐ Show number of your favorites')
-async def favorite_count(interaction: discord.Interaction):
-    count = len(bot.favorites.get(interaction.user.id, []))
-    await interaction.response.send_message(f"⭐ **Favorites:** `{count}`", ephemeral=True)
-
-@bot.tree.command(name='queue_count', description='📋 Show number of queued songs')
-async def queue_count(interaction: discord.Interaction):
-    count = len(bot.queues.get(interaction.guild_id, []))
-    await interaction.response.send_message(f"📋 **Queued songs:** `{count}`")
-
-@bot.tree.command(name='clear_nowplaying', description='🧹 Clear current-song display')
-async def clear_nowplaying(interaction: discord.Interaction):
-    bot.now_playing.pop(interaction.guild_id, None)
-    await interaction.response.send_message("🧹 **Current-song display cleared**")
-
-@bot.tree.command(name='loop_off', description='❌ Turn loop off')
-async def loop_off(interaction: discord.Interaction):
-    bot.loop_mode[interaction.guild_id] = 'none'
-    await interaction.response.send_message("❌ **Loop disabled**")
-
-@bot.tree.command(name='shuffle_on', description='🔀 Turn shuffle on')
-async def shuffle_on(interaction: discord.Interaction):
-    bot.shuffle_mode[interaction.guild_id] = True
-    q = bot.queues.get(interaction.guild_id)
-    if q:
-        random.shuffle(q)
-    await interaction.response.send_message("🔀 **Shuffle enabled**")
-
-@bot.tree.command(name='shuffle_off', description='➡️ Turn shuffle off')
-async def shuffle_off(interaction: discord.Interaction):
-    bot.shuffle_mode[interaction.guild_id] = False
-    await interaction.response.send_message("➡️ **Shuffle disabled**")
-
-@bot.tree.command(name='queue_clear_after', description='🧹 Clear all queued songs after the current one')
-async def queue_clear_after(interaction: discord.Interaction):
-    bot.queues[interaction.guild_id] = []
-    await interaction.response.send_message("🧹 **Upcoming queue cleared**")
-
-@bot.tree.command(name='volume_reset', description='🔊 Reset volume to default')
-async def volume_reset(interaction: discord.Interaction):
-    vc = get_vc(interaction.guild_id)
-    if not vc or not vc.source or not hasattr(vc.source, 'volume'):
-        await interaction.response.send_message("❌ No active audio source", ephemeral=True); return
-    vc.source.volume = DEFAULT_VOLUME
-    await interaction.response.send_message(f"🔊 **Volume reset:** `{int(DEFAULT_VOLUME * 100)}%`")
-
-async def uptime_seconds(interaction: discord.Interaction):
-    await interaction.response.send_message(f"⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds")
-
-if __name__ == '__main__':
-    # Fly.io health endpoint.  Flask runs in a background thread while the
-    # Discord gateway owns the main thread.
-    import threading
-    port = int(os.getenv('PORT', '8080'))
-    threading.Thread(
-        target=lambda: app.run(host='0.0.0.0', port=port, use_reloader=False),
-        daemon=True,
-    ).start()
-    bot.run(TOKEN)
+        embed.add_field(name=f"`{i}.` {s['title'][:80]}", value=f"
