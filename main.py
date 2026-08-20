@@ -14,30 +14,24 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 
-# بۆ Slash Commands پێویستە Bot وەک خۆی بمێنێت بەڵام لەگەڵ Tree sync
 class MusicBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix=BOT_PREFIX, intents=intents)
 
     async def setup_hook(self):
-        # ڕێکخستنی فەرمانەکان لەگەڵ دیسکۆرددا
         await self.tree.sync()
         print("✅ Slash commands synced successfully!")
 
 bot = MusicBot()
 
-# Queue structure: {guild_id: [{'url': ..., 'title': ..., 'duration': ..., 'thumbnail': ...}]}
 queues = {}
-# Voice client references
 voice_clients = {}
 
-# FFmpeg options
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
     'options': '-vn'
 }
 
-# YT-DLP options
 YDL_OPTIONS = {
     'format': 'bestaudio/best',
     'quiet': True,
@@ -46,6 +40,46 @@ YDL_OPTIONS = {
     'default_search': 'ytsearch',
     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
+
+# 🎛️ Music Control Panel (Buttons View)
+class MusicControlView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="⏸️ Pause/Resume", style=discord.ButtonStyle.primary)
+    async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild_id = interaction.guild.id
+        vc = voice_clients.get(guild_id)
+        if vc and vc.is_playing():
+            vc.pause()
+            await interaction.response.send_message("⏸️ Paused music.", ephemeral=True)
+        elif vc and vc.is_paused():
+            vc.resume()
+            await interaction.response.send_message("▶️ Resumed music.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Nothing is playing.", ephemeral=True)
+
+    @discord.ui.button(label="⏭️ Skip", style=discord.ButtonStyle.secondary)
+    async def skip_song(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild_id = interaction.guild.id
+        if guild_id in voice_clients and voice_clients[guild_id].is_playing():
+            voice_clients[guild_id].stop()
+            await interaction.response.send_message("⏭️ Skipped current song!", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Nothing to skip.", ephemeral=True)
+
+    @discord.ui.button(label="⏹️ Stop & Leave", style=discord.ButtonStyle.danger)
+    async def stop_bot(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild_id = interaction.guild.id
+        if guild_id in voice_clients and voice_clients[guild_id].is_connected():
+            if voice_clients[guild_id].is_playing():
+                voice_clients[guild_id].stop()
+            await voice_clients[guild_id].disconnect()
+            voice_clients.pop(guild_id, None)
+            queues.pop(guild_id, None)
+            await interaction.response.send_message("👋 Disconnected and cleared queue!", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ I'm not connected to a voice channel.", ephemeral=True)
 
 def download_from_github(url, dest_dir="downloads"):
     os.makedirs(dest_dir, exist_ok=True)
@@ -140,7 +174,7 @@ async def play_next_interaction(interaction: discord.Interaction):
         vc.source.volume = DEFAULT_VOLUME
 
         try:
-            await interaction.channel.send(f"🎵 **Now Playing:** {song['title']}")
+            await interaction.channel.send(f"🎵 **Now Playing:** {song['title']}", view=MusicControlView())
         except:
             pass
     except Exception as e:
