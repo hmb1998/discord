@@ -42,9 +42,8 @@ class MusicBot(commands.Bot):
         self.song_skiplist = {}
 
     async def setup_hook(self):
-        print("✅ Syncing slash commands...")
-        await self.tree.sync()
-        print(f"✅ {len(self.tree.get_commands())} Slash Commands loaded!")
+        print("✅ Bot is setting up...")
+        print(f"✅ Ready to run without forced sync!")
 
 bot = MusicBot()
 bot.remove_command('help')
