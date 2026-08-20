@@ -4,19 +4,14 @@ import yt_dlp
 import asyncio
 import os
 import re
-import threading
 from flask import Flask
 from config import TOKEN, DEFAULT_VOLUME
 
-# دروستکردنی فڵەسک بۆ وێب سەروەر لەسەر پۆرتی 8080 بۆ ڕێگریکردن لە داخستنی مەشینەکە
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "Bot is running!"
-
-def run_flask():
-    app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -340,15 +335,16 @@ async def hmb(ctx):
             child.disabled = True
     view.on_timeout = disable_buttons
 
+async def main():
+    import threading
+    # ڕاگرتنی فڵەسک لە پاشبنەمادا بە شێوازێکی جێگیر
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False)).start()
+    await bot.start(TOKEN)
+
 if __name__ == "__main__":
     if not TOKEN:
         exit(1)
-    
-    # دەستپێکردنی وێب سەروەری فڵەسک لە تریدێکی جیاوازدا
-    t = threading.Thread(target=run_flask, daemon=True)
-    t.start()
-
     try:
-        bot.run(TOKEN)
+        asyncio.run(main())
     except KeyboardInterrupt:
         pass
