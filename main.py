@@ -113,7 +113,8 @@ async def handle_ping(request):
 
 async def start_web_server():
     app = web.Application()
-    app.add_routes([web.get('/', handle_ping), web.get('/healthz', handle_ping)])
+    app.router.add_get('/', handle_ping)
+    app.router.add_get('/healthz', handle_ping)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8080)
