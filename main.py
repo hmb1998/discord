@@ -115,7 +115,7 @@ async def play_next_message(interaction_or_ctx, guild_id):
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
-async def start_web_server():
+async def run_web_server():
     app = web.Application()
     app.add_routes([web.get('/', handle_ping)])
     runner = web.AppRunner(app)
@@ -374,11 +374,13 @@ async def hmb(interaction: discord.Interaction):
 
 
 async def main():
-    await start_web_server()
-    async with bot:
-        await bot.start(TOKEN)
+    await run_web_server()
+    await bot.start(TOKEN)
 
 if __name__ == "__main__":
     if not TOKEN:
         exit(1)
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
