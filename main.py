@@ -108,18 +108,18 @@ async def play_next_message(ctx):
         except:
             pass
 
-# Web server for Fly.io health checks
+# Instant Web server response for Fly.io
 async def handle_ping(request):
-    return web.Response(text="Bot is running!")
+    return web.Response(text="OK")
 
 async def start_web_server():
     app = web.Application()
-    app.add_routes([web.get('/', handle_ping)])
+    app.add_routes([web.get('/', handle_ping), web.get('/healthz', handle_ping)])
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8080)
     await site.start()
-    print("🌐 Web server started on port 8080")
+    print("🌐 Web server started instantly on port 8080")
 
 @bot.event
 async def on_ready():
