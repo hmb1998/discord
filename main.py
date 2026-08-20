@@ -18,7 +18,7 @@ class MusicBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix=BOT_PREFIX, intents=intents)
         self.queues = {}
-        self.voice_clients = {}
+        self.custom_voice_clients = {}
 
     async def setup_hook(self):
         await self.tree.sync()
@@ -103,13 +103,13 @@ async def play_next_interaction(interaction: discord.Interaction):
     if guild_id not in bot.queues or len(bot.queues[guild_id]) == 0:
         await asyncio.sleep(5)
         if guild_id in bot.queues and len(bot.queues[guild_id]) == 0:
-            vc = bot.voice_clients.get(guild_id)
+            vc = bot.custom_voice_clients.get(guild_id)
             if vc and vc.is_connected():
                 await vc.disconnect()
         return
 
     song = bot.queues[guild_id].pop(0)
-    vc = bot.voice_clients.get(guild_id)
+    vc = bot.custom_voice_clients.get(guild_id)
     if not vc or not vc.is_connected():
         return
 
@@ -161,15 +161,15 @@ async def play(interaction: discord.Interaction, query: str):
     voice_channel = interaction.user.voice.channel
     guild_id = interaction.guild.id
 
-    if guild_id not in bot.voice_clients or not bot.voice_clients[guild_id].is_connected():
+    if guild_id not in bot.custom_voice_clients or not bot.custom_voice_clients[guild_id].is_connected():
         try:
             vc = await voice_channel.connect()
-            bot.voice_clients[guild_id] = vc
+            bot.custom_voice_clients[guild_id] = vc
         except Exception as e:
             await interaction.followup.send(f"❌ Could not connect: {str(e)[:100]}")
             return
     else:
-        vc = bot.voice_clients[guild_id]
+        vc = bot.custom_voice_clients[guild_id]
         if vc.channel != voice_channel:
             await vc.move_to(voice_channel)
 
@@ -193,8 +193,8 @@ async def play(interaction: discord.Interaction, query: str):
 @bot.tree.command(name='skip', description='Skip the current song')
 async def skip(interaction: discord.Interaction):
     guild_id = interaction.guild.id
-    if guild_id in bot.voice_clients and bot.voice_clients[guild_id].is_playing():
-        bot.voice_clients[guild_id].stop()
+    if guild_id in bot.custom_voice_clients and bot.custom_voice_clients[guild_id].is_playing():
+        bot.custom_voice_clients[guild_id].stop()
         await interaction.response.send_message("⏭️ Skipped!")
     else:
         await interaction.response.send_message("❌ Nothing is playing right now.", ephemeral=True)
@@ -220,11 +220,11 @@ async def show_queue(interaction: discord.Interaction):
 @bot.tree.command(name='stop', description='Stop playing and disconnect the bot')
 async def stop(interaction: discord.Interaction):
     guild_id = interaction.guild.id
-    if guild_id in bot.voice_clients and bot.voice_clients[guild_id].is_connected():
-        if bot.voice_clients[guild_id].is_playing():
-            bot.voice_clients[guild_id].stop()
-        await bot.voice_clients[guild_id].disconnect()
-        bot.voice_clients.pop(guild_id, None)
+    if guild_id in bot.custom_voice_clients and bot.custom_voice_clients[guild_id].is_connected():
+        if bot.custom_voice_clients[guild_id].is_playing():
+            bot.custom_voice_clients[guild_id].stop()
+        await bot.custom_voice_clients[guild_id].disconnect()
+        bot.custom_voice_clients.pop(guild_id, None)
         bot.queues.pop(guild_id, None)
         await interaction.response.send_message("👋 Disconnected!")
     else:
@@ -254,8 +254,8 @@ class ControlView(discord.ui.View):
             color=discord.Color.blurple()
         )
 
-        if guild_id in bot.voice_clients and bot.voice_clients[guild_id].is_connected():
-            vc = bot.voice_clients[guild_id]
+        if guild_id in bot.custom_voice_clients and bot.custom_voice_clients[guild_id].is_connected():
+            vc = bot.custom_voice_clients[guild_id]
             status = "🟢 Playing" if vc.is_playing() else "🟡 Paused" if vc.is_paused() else "⚫ Stopped"
             channel_name = vc.channel.name if vc.channel else "Unknown"
 
@@ -274,11 +274,11 @@ class ControlView(discord.ui.View):
     @discord.ui.button(label="⏸ Pause/Resume", style=discord.ButtonStyle.secondary, row=0)
     async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild_id = self.guild_id
-        if guild_id not in bot.voice_clients:
+        if guild_id not in bot.custom_voice_clients:
             await interaction.response.send_message("❌ Not connected!", ephemeral=True)
             return
 
-        vc = bot.voice_clients[guild_id]
+        vc = bot.custom_voice_clients[guild_id]
         if vc.is_playing():
             vc.pause()
             await interaction.response.send_message("⏸ Paused", ephemeral=True)
@@ -295,8 +295,8 @@ class ControlView(discord.ui.View):
     @discord.ui.button(label="⏭ Skip", style=discord.ButtonStyle.primary, row=0)
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild_id = self.guild_id
-        if guild_id in bot.voice_clients and bot.voice_clients[guild_id].is_playing():
-            bot.voice_clients[guild_id].stop()
+        if guild_id in bot.custom_voice_clients and bot.custom_voice_clients[guild_id].is_playing():
+            bot.custom_voice_clients[guild_id].stop()
             await interaction.response.send_message("⏭ Skipped!", ephemeral=True)
         else:
             await interaction.response.send_message("❌ Nothing is playing", ephemeral=True)
@@ -304,11 +304,11 @@ class ControlView(discord.ui.View):
     @discord.ui.button(label="⏹ Stop", style=discord.ButtonStyle.danger, row=0)
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild_id = self.guild_id
-        if guild_id in bot.voice_clients and bot.voice_clients[guild_id].is_connected():
-            if bot.voice_clients[guild_id].is_playing():
-                bot.voice_clients[guild_id].stop()
-            await bot.voice_clients[guild_id].disconnect()
-            bot.voice_clients.pop(guild_id, None)
+        if guild_id in bot.custom_voice_clients and bot.custom_voice_clients[guild_id].is_connected():
+            if bot.custom_voice_clients[guild_id].is_playing():
+                bot.custom_voice_clients[guild_id].stop()
+            await bot.custom_voice_clients[guild_id].disconnect()
+            bot.custom_voice_clients.pop(guild_id, None)
             bot.queues.pop(guild_id, None)
 
             await interaction.response.send_message("👋 Disconnected!", ephemeral=True)
@@ -320,11 +320,11 @@ class ControlView(discord.ui.View):
     @discord.ui.button(label="🔊 +10", style=discord.ButtonStyle.success, row=1)
     async def volume_up(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild_id = self.guild_id
-        if guild_id not in bot.voice_clients:
+        if guild_id not in bot.custom_voice_clients:
             await interaction.response.send_message("❌ Not connected", ephemeral=True)
             return
 
-        vc = bot.voice_clients[guild_id]
+        vc = bot.custom_voice_clients[guild_id]
         if not vc.source or not hasattr(vc.source, 'volume'):
             await interaction.response.send_message("❌ No audio source", ephemeral=True)
             return
@@ -338,11 +338,11 @@ class ControlView(discord.ui.View):
     @discord.ui.button(label="🔉 -10", style=discord.ButtonStyle.success, row=1)
     async def volume_down(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild_id = self.guild_id
-        if guild_id not in bot.voice_clients:
+        if guild_id not in bot.custom_voice_clients:
             await interaction.response.send_message("❌ Not connected", ephemeral=True)
             return
 
-        vc = bot.voice_clients[guild_id]
+        vc = bot.custom_voice_clients[guild_id]
         if not vc.source or not hasattr(vc.source, 'volume'):
             await interaction.response.send_message("❌ No audio source", ephemeral=True)
             return
@@ -379,12 +379,12 @@ async def control(interaction: discord.Interaction):
         return
 
     guild_id = interaction.guild.id
-    if guild_id not in bot.voice_clients or not bot.voice_clients[guild_id].is_connected():
+    if guild_id not in bot.custom_voice_clients or not bot.custom_voice_clients[guild_id].is_connected():
         await interaction.response.send_message("❌ Bot is not connected! Use `/play` first.", ephemeral=True)
         return
 
     view = ControlView(interaction)
-    vc = bot.voice_clients[guild_id]
+    vc = bot.custom_voice_clients[guild_id]
     volume = int(vc.source.volume * 100) if vc.source and hasattr(vc.source, 'volume') else DEFAULT_VOLUME
 
     embed = discord.Embed(
