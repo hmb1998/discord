@@ -9,6 +9,7 @@ primary_region = 'fra'
 [[services]]
   protocol = 'tcp'
   internal_port = 8080
+  processes = ['app']
 
   [[services.ports]]
     port = 80
@@ -17,8 +18,3 @@ primary_region = 'fra'
   [[services.ports]]
     port = 443
     handlers = ['tls', 'http']
-
-  [services.concurrency]
-    type = 'requests'
-    hard_limit = 250
-    soft_limit = 200
