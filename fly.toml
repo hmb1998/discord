@@ -1,20 +1,26 @@
-app = 'discord-esjwfw'
-primary_region = 'fra'
+app = "discord-esjwfw"
+primary_region = "fra"
 
 [build]
 
-[processes]
-  app = 'python main.py'
-
-[[services]]
-  protocol = 'tcp'
+[services]
+  protocol = "tcp"
   internal_port = 8080
-  processes = ['app']
+  processes = ["app"]
 
   [[services.ports]]
     port = 80
-    handlers = ['http']
+    handlers = ["http"]
+    force_https = true
 
   [[services.ports]]
     port = 443
-    handlers = ['tls', 'http']
+    handlers = ["tls", "http"]
+
+  [[services.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/"
+    protocol = "http"
