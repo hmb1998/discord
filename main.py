@@ -1,6 +1,5 @@
 import discord
 from discord import app_commands
-from discord.ext import commands
 import yt_dlp
 import asyncio
 import os
@@ -15,9 +14,10 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 
-class MusicBot(commands.Bot):
+class MusicBot(discord.Client):
     def __init__(self):
-        super().__init__(command_prefix='!', intents=intents)
+        super().__init__(intents=intents)
+        self.tree = app_commands.CommandTree(self)
         self.queues = {}
         self.custom_voice_clients = {}
 
