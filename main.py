@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 import yt_dlp
 import asyncio
@@ -13,7 +14,17 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 
-bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents)
+# بۆ Slash Commands پێویستە Bot وەک خۆی بمێنێت بەڵام لەگەڵ Tree sync
+class MusicBot(commands.Bot):
+    def __init__(self):
+        super().__init__(command_prefix=BOT_PREFIX, intents=intents)
+
+    async def setup_hook(self):
+        # ڕێکخستنی فەرمانەکان لەگەڵ دیسکۆرددا
+        await self.tree.sync()
+        print("✅ Slash commands synced successfully!")
+
+bot = MusicBot()
 
 # Queue structure: {guild_id: [{'url': ..., 'title': ..., 'duration': ..., 'thumbnail': ...}]}
 queues = {}
@@ -37,20 +48,11 @@ YDL_OPTIONS = {
 }
 
 def download_from_github(url, dest_dir="downloads"):
-    """Download files from a GitHub repository (raw file or full repo)"""
-    import requests
-    import zipfile
-    import io
-    import os
-
     os.makedirs(dest_dir, exist_ok=True)
-
-    # Case 1: Raw file URL (github.com -> raw.githubusercontent.com)
     if "github.com" in url and "/blob/" in url:
         raw_url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
         filename = url.split("/")[-1]
         filepath = os.path.join(dest_dir, filename)
-
         try:
             r = requests.get(raw_url, timeout=30)
             if r.status_code == 200:
@@ -60,15 +62,12 @@ def download_from_github(url, dest_dir="downloads"):
             return f"❌ HTTP {r.status_code}"
         except Exception as e:
             return f"❌ Error: {str(e)[:80]}"
-
-    # Case 2: Full repo download (as zipball)
     elif "github.com/" in url and ("tree" not in url):
         repo_path = url.replace(".git", "")
         parts = repo_path.split("github.com/")[1].split("/")
         if len(parts) >= 2:
             owner, repo = parts[0], parts[1]
             zip_url = f"https://api.github.com/repos/{owner}/{repo}/zipball/main"
-
             try:
                 r = requests.get(zip_url, timeout=60)
                 if r.status_code == 200:
@@ -77,28 +76,23 @@ def download_from_github(url, dest_dir="downloads"):
                     extracted = [n for n in z.namelist() if n.endswith('/')][:3]
                     folder_name = extracted[0].split('/')[0] if extracted else repo
                     return f"✅ Repo `{owner}/{repo}` extracted to `{dest_dir}/{folder_name}/`"
-                return f"❌ HTTP {r.status_code} (maybe wrong URL or private repo)"
+                return f"❌ HTTP {r.status_code}"
             except Exception as e:
                 return f"❌ Error: {str(e)[:80]}"
-
-    return "❌ Could not parse GitHub URL. Use a raw file URL or repo URL."
+    return "❌ Could not parse GitHub URL."
 
 def search_youtube(query):
-    """Search YouTube and return first result info"""
     with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
         try:
             if re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/', query):
-                # Direct URL
                 info = ydl.extract_info(query, download=False)
                 if 'entries' in info:
                     info = info['entries'][0]
             else:
-                # Search query
                 results = ydl.extract_info(f"ytsearch:{query}", download=False)
                 if not results or 'entries' not in results or len(results['entries']) == 0:
                     return {'error': 'No results found'}
                 info = results['entries'][0]
-
             return {
                 'url': info['webpage_url'],
                 'title': info.get('title', 'Unknown Title'),
@@ -109,10 +103,8 @@ def search_youtube(query):
         except Exception as e:
             return {'error': str(e)[:200]}
 
-async def play_next(ctx):
-    """Play the next song in the queue"""
-    guild_id = ctx.guild.id
-
+async def play_next_interaction(interaction: discord.Interaction):
+    guild_id = interaction.guild.id
     if guild_id not in queues or len(queues[guild_id]) == 0:
         await asyncio.sleep(5)
         if guild_id in queues and len(queues[guild_id]) == 0:
@@ -122,7 +114,6 @@ async def play_next(ctx):
         return
 
     song = queues[guild_id].pop(0)
-
     vc = voice_clients.get(guild_id)
     if not vc or not vc.is_connected():
         return
@@ -130,7 +121,7 @@ async def play_next(ctx):
     def after_playing(error):
         if error:
             print(f"Playback error: {error}")
-        coro = play_next(ctx)
+        coro = play_next_interaction(interaction)
         fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
         try:
             fut.result()
@@ -148,11 +139,12 @@ async def play_next(ctx):
         vc.source = discord.PCMVolumeTransformer(vc.source)
         vc.source.volume = DEFAULT_VOLUME
 
-        await ctx.send(f"🎵 **Now Playing:** {song['title']}")
-
+        try:
+            await interaction.channel.send(f"🎵 **Now Playing:** {song['title']}")
+        except:
+            pass
     except Exception as e:
-        await ctx.send(f"❌ Error playing: {str(e)[:100]}")
-        coro = play_next(ctx)
+        coro = play_next_interaction(interaction)
         fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
         try:
             fut.result()
@@ -162,73 +154,61 @@ async def play_next(ctx):
 @bot.event
 async def on_ready():
     print(f'✅ Bot is ready! Logged in as {bot.user}')
-    await bot.change_presence(
-        activity=discord.Activity(
-            type=discord.ActivityType.listening,
-            name=f"{BOT_PREFIX}play commands"
-        )
-    )
 
-@bot.command(name='play', aliases=['p'])
-async def play(ctx, *, query: str):
-    """Play a song from YouTube by URL or search query"""
-    if not ctx.author.voice:
-        await ctx.send("❌ You must be in a voice channel first!")
+@bot.tree.command(name='play', description='Play a song from YouTube')
+@app_commands.describe(query='The song name or YouTube URL')
+async def play(interaction: discord.Interaction, query: str):
+    if not interaction.user.voice:
+        await interaction.response.send_message("❌ You must be in a voice channel first!", ephemeral=True)
         return
 
-    voice_channel = ctx.author.voice.channel
+    await interaction.response.defer()
+    voice_channel = interaction.user.voice.channel
+    guild_id = interaction.guild.id
 
-    # Connect / move to voice channel
-    if ctx.guild.id not in voice_clients or not voice_clients[ctx.guild.id].is_connected():
+    if guild_id not in voice_clients or not voice_clients[guild_id].is_connected():
         try:
             vc = await voice_channel.connect()
-            voice_clients[ctx.guild.id] = vc
+            voice_clients[guild_id] = vc
         except Exception as e:
-            await ctx.send(f"❌ Could not connect: {str(e)[:100]}")
+            await interaction.followup.send(f"❌ Could not connect: {str(e)[:100]}")
             return
     else:
-        vc = voice_clients[ctx.guild.id]
+        vc = voice_clients[guild_id]
         if vc.channel != voice_channel:
             await vc.move_to(voice_channel)
 
-    # Search for the song
-    await ctx.send(f"🔍 Searching for `{query[:50]}`...")
     song = search_youtube(query)
-
     if 'error' in song:
-        await ctx.send(f"❌ {song['error']}")
+        await interaction.followup.send(f"❌ {song['error']}")
         return
 
-    # Initialize queue
-    if ctx.guild.id not in queues:
-        queues[ctx.guild.id] = []
+    if guild_id not in queues:
+        queues[guild_id] = []
 
-    queues[ctx.guild.id].append(song)
+    queues[guild_id].append(song)
 
     if not vc.is_playing():
-        await play_next(ctx)
-        await ctx.send(f"✅ **Added to queue:** {song['title']}")
+        await interaction.followup.send(f"✅ **Added to queue:** {song['title']}")
+        await play_next_interaction(interaction)
     else:
-        position = len(queues[ctx.guild.id])
-        await ctx.send(f"✅ **Added to queue:** {song['title']} (Position #{position})")
+        position = len(queues[guild_id])
+        await interaction.followup.send(f"✅ **Added to queue:** {song['title']} (Position #{position})")
 
-@bot.command(name='skip', aliases=['next', 's'])
-async def skip(ctx):
-    """Skip the current song"""
-    guild_id = ctx.guild.id
+@bot.tree.command(name='skip', description='Skip the current song')
+async def skip(interaction: discord.Interaction):
+    guild_id = interaction.guild.id
     if guild_id in voice_clients and voice_clients[guild_id].is_playing():
         voice_clients[guild_id].stop()
-        await ctx.send("⏭️ Skipped!")
+        await interaction.response.send_message("⏭️ Skipped!")
     else:
-        await ctx.send("❌ Nothing is playing right now.")
+        await interaction.response.send_message("❌ Nothing is playing right now.", ephemeral=True)
 
-@bot.command(name='queue', aliases=['q'])
-async def show_queue(ctx):
-    """Show the current song queue"""
-    guild_id = ctx.guild.id
-
+@bot.tree.command(name='queue', description='Show the current song queue')
+async def show_queue(interaction: discord.Interaction):
+    guild_id = interaction.guild.id
     if guild_id not in queues or len(queues[guild_id]) == 0:
-        await ctx.send("📭 Queue is empty.")
+        await interaction.response.send_message("📭 Queue is empty.", ephemeral=True)
         return
 
     msg = "**🎶 Song Queue:**\n"
@@ -240,64 +220,27 @@ async def show_queue(ctx):
 
     if len(msg) > 2000:
         msg = msg[:1997] + "..."
+    await interaction.response.send_message(msg)
 
-    await ctx.send(msg)
-
-@bot.command(name='stop', aliases=['dc', 'disconnect', 'leave'])
-async def stop(ctx):
-    """Stop playing and disconnect the bot"""
-    guild_id = ctx.guild.id
-
+@bot.tree.command(name='stop', description='Stop playing and disconnect the bot')
+async def stop(interaction: discord.Interaction):
+    guild_id = interaction.guild.id
     if guild_id in voice_clients and voice_clients[guild_id].is_connected():
         if voice_clients[guild_id].is_playing():
             voice_clients[guild_id].stop()
         await voice_clients[guild_id].disconnect()
         voice_clients.pop(guild_id, None)
         queues.pop(guild_id, None)
-        await ctx.send("👋 Disconnected!")
+        await interaction.response.send_message("👋 Disconnected!")
     else:
-        await ctx.send("❌ I'm not connected to a voice channel.")
+        await interaction.response.send_message("❌ I'm not connected to a voice channel.", ephemeral=True)
 
-@bot.command(name='github_dl', aliases=['gdl', 'gh'])
-async def github_download(ctx, url: str):
-    """Download files from a GitHub repository"""
-    msg = await ctx.send(f"📥 Downloading from GitHub...")
-    result = download_from_github(url)
-    await msg.edit(content=result)
-
-@bot.command(name='ping')
-async def ping(ctx):
-    """Check bot latency"""
+@bot.tree.command(name='ping', description='Check bot latency')
+async def ping(interaction: discord.Interaction):
     latency = round(bot.latency * 1000)
-    await ctx.send(f"🏓 Pong! Latency: **{latency}ms**")
-
-@bot.command(name='helpme', aliases=['h'])
-async def help_command(ctx):
-    """Show available commands"""
-    embed = discord.Embed(
-        title="🎵 Discord Music Bot Commands",
-        description="Prefix: `!`",
-        color=discord.Color.blue()
-    )
-    embed.add_field(name="!play `<URL or search>`", value="Play a song from YouTube", inline=False)
-    embed.add_field(name="!skip", value="Skip current song", inline=True)
-    embed.add_field(name="!queue", value="Show the song queue", inline=True)
-    embed.add_field(name="!stop", value="Disconnect from voice", inline=True)
-    embed.add_field(name="!ping", value="Check bot latency", inline=True)
-    embed.add_field(name="!github_dl `<URL>`", value="Download from GitHub", inline=False)
-    embed.set_footer(text="HackerAI Music Bot | No token in code")
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(f"🏓 Pong! Latency: **{latency}ms**")
 
 if __name__ == "__main__":
     if not TOKEN:
-        print("=" * 50)
-        print("❌ ERROR: DISCORD_BOT_TOKEN is not set!")
-        print()
-        print("👉 Set it on fly.io with:")
-        print("   fly secrets set DISCORD_BOT_TOKEN=your_discord_token_here")
-        print()
-        print("👉 Or locally with:")
-        print("   export DISCORD_BOT_TOKEN=your_discord_token_here")
-        print("=" * 50)
         exit(1)
     bot.run(TOKEN)
