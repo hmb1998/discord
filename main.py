@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is running and alive!"
+    return "Bot is running perfectly!"
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -171,7 +171,7 @@ class SongSearchModal(discord.ui.Modal, title="🔍 Search or Play Song"):
             await interaction.followup.send(f"✅ **Added to queue:** {song['title']} (Position #{position})", ephemeral=True)
 
         embed = await self.view_instance.update_embed()
-        await self.view_instance.message.edit(embed=embed)
+        await self.message.edit(embed=embed)
 
 class ControlView(discord.ui.View):
     def __init__(self, ctx):
@@ -335,10 +335,7 @@ async def hmb(ctx):
             child.disabled = True
     view.on_timeout = disable_buttons
 
-# دەستپێکردنی بۆتەکە لە پشتەوە کاتێک Gunicorn فڵەسک بەڕێوەدەبات
+# دەستپێکردنی بۆت لە پشتەوە کاتێک Gunicorn کار دەکات
 import threading
-def run_bot():
-    if TOKEN:
-        bot.run(TOKEN)
-
-threading.Thread(target=run_bot, daemon=True).start()
+if TOKEN:
+    threading.Thread(target=lambda: bot.run(TOKEN), daemon=True).start()
