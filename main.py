@@ -1022,8 +1022,8 @@ async def remove(interaction: discord.Interaction, position: int):
     await interaction.response.send_message(f"🗑 **Removed:** {song['title']}")
 
 # ===== 13. CLEAR =====
-@bot.tree.command(name='clear', description='🧹 Clear the entire queue')
-async def clear(interaction: discord.Interaction):
+@bot.tree.command(name='clear_queue', description='🧹 Clear the entire music queue')
+async def clear_queue(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     if guild_id in bot.queues:
         count = len(bot.queues[guild_id])
