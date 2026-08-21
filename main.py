@@ -41,6 +41,15 @@ class MusicBot(commands.Bot):
         self.eq_presets = {}
         self.song_skiplist = {}
 
+        # Professional moderation / security state
+        self.security_settings = {}   # guild_id -> settings
+        self.spam_events = {}         # (guild_id, user_id) -> deque timestamps
+        self.spam_violations = {}     # (guild_id, user_id) -> violation count
+        self.spam_last_message = {}   # (guild_id, user_id) -> (normalized text, count, timestamp)
+        self.warnings = {}            # (guild_id, user_id) -> warning count
+        self.lockdown_channels = set()
+
+
     async def setup_hook(self):
         print("✅ Syncing slash commands...")
         await self.tree.sync()
@@ -92,6 +101,173 @@ async def on_ready():
     if not _presence_initialized:
         await set_hmb_presence()
 
+
+
+# ---------------------------------------------------------------------------
+# Professional moderation / security
+# ---------------------------------------------------------------------------
+from collections import defaultdict, deque
+
+DEFAULT_SECURITY = {
+    "spam_window": 5.0,
+    "spam_limit": 5,                 # 5 messages in 5 seconds => timeout
+    "first_timeout": 5 * 60,
+    "second_timeout": 10 * 60,
+    "third_timeout": 60 * 60,
+    "max_timeout": 24 * 60 * 60,
+    "duplicate_limit": 3,
+    "mention_limit": 5,
+    "youtube_only": False,           # when enabled, only YouTube links are allowed
+    "delete_invites": True,
+    "delete_external_links": False,
+    "log_channel_id": None,
+}
+
+def security_settings(guild_id):
+    settings = bot.security_settings.get(guild_id)
+    if settings is None:
+        settings = DEFAULT_SECURITY.copy()
+        bot.security_settings[guild_id] = settings
+    return settings
+
+def _is_staff(member):
+    return bool(
+        member.guild_permissions.administrator
+        or member.guild_permissions.manage_guild
+        or member.guild_permissions.manage_messages
+    )
+
+def _is_protected(member):
+    return bool(member.guild.owner_id == member.id or member.guild_permissions.administrator)
+
+def _is_youtube_url(url):
+    return bool(re.match(
+        r"^https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtube\.com/shorts/|youtu\.be/)",
+        url,
+        re.I,
+    ))
+
+def _contains_url(content):
+    return bool(re.search(r"https?://\S+", content, re.I))
+
+async def _send_security_log(guild, message):
+    settings = security_settings(guild.id)
+    channel_id = settings.get("log_channel_id")
+    if not channel_id:
+        return
+    channel = guild.get_channel(channel_id)
+    if channel:
+        try:
+            await channel.send(message)
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+async def _timeout_member(member, seconds, reason):
+    if not member.guild.me or not member.guild.me.guild_permissions.moderate_members:
+        return False
+    try:
+        until = discord.utils.utcnow() + datetime.timedelta(seconds=seconds)
+        await member.timeout(until, reason=reason[:512])
+        return True
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+
+async def _handle_spam(message):
+    if message.author.bot or message.webhook_id or not message.guild:
+        return False
+
+    guild = message.guild
+    member = message.author
+    if _is_protected(member) or _is_staff(member):
+        return False
+
+    settings = security_settings(guild.id)
+    now = time.monotonic()
+    key = (guild.id, member.id)
+
+    events = bot.spam_events.setdefault(key, deque())
+    while events and now - events[0] > settings["spam_window"]:
+        events.popleft()
+    events.append(now)
+
+    normalized = re.sub(r"\s+", " ", message.content.strip().lower())
+    previous = bot.spam_last_message.get(key)
+    duplicate = False
+    if normalized and previous:
+        old_text, count, old_time = previous
+        if normalized == old_text and now - old_time <= settings["spam_window"]:
+            count += 1
+            duplicate = count >= settings["duplicate_limit"]
+        else:
+            count = 1
+        bot.spam_last_message[key] = (normalized, count, now)
+    elif normalized:
+        bot.spam_last_message[key] = (normalized, 1, now)
+
+    mention_count = len(message.mentions) + len(message.role_mentions)
+    invite = bool(re.search(
+        r"(?:discord\.gg/|discord\.com/invite/|discord\.me/|discord\.io/)",
+        message.content,
+        re.I,
+    ))
+    urls = re.findall(r"https?://\S+", message.content, re.I)
+    bad_external = settings["delete_external_links"] and any(
+        not _is_youtube_url(u.rstrip(").,!?")) for u in urls
+    )
+    youtube_block = settings["youtube_only"] and any(
+        not _is_youtube_url(u.rstrip(").,!?")) for u in urls
+    )
+
+    flood = len(events) > settings["spam_limit"]
+    mention_spam = mention_count >= settings["mention_limit"]
+    violation = flood or duplicate or mention_spam or (
+        settings["delete_invites"] and invite
+    ) or bad_external or youtube_block
+
+    if not violation:
+        return False
+
+    bot.spam_violations[key] = bot.spam_violations.get(key, 0) + 1
+    level = bot.spam_violations[key]
+
+    try:
+        await message.delete()
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+        pass
+
+    if level >= 6:
+        duration = settings["max_timeout"]
+    elif level >= 3:
+        duration = settings["third_timeout"]
+    elif level == 2:
+        duration = settings["second_timeout"]
+    else:
+        duration = settings["first_timeout"]
+
+    reasons = []
+    if flood:
+        reasons.append(f"flood ({len(events)} msgs/{settings['spam_window']:g}s)")
+    if duplicate:
+        reasons.append("repeated message")
+    if mention_spam:
+        reasons.append(f"mention spam ({mention_count})")
+    if invite:
+        reasons.append("Discord invite")
+    if bad_external or youtube_block:
+        reasons.append("link policy")
+
+    reason = "Anti-spam: " + ", ".join(reasons)
+    applied = await _timeout_member(member, duration, reason)
+    await _send_security_log(
+        guild,
+        f"🛡️ Anti-spam | {member.mention} | level `{level}` | "
+        f"timeout `{duration // 60}m` | {reason}"
+    )
+    return applied
+
+async def _security_on_message(message):
+    # Never interfere with commands until the moderation checks are complete.
+    await _handle_spam(message)
 
 # ---------------------------------------------------------------------------
 # Prefix-command bridge
@@ -238,6 +414,13 @@ async def dispatch_prefix_command(message):
 
 @bot.event
 async def on_message(message):
+    if message.author.bot:
+        return
+
+    # Strong anti-spam/security layer.
+    await _security_on_message(message)
+
+    # Keep the existing !prefix command bridge.
     if await dispatch_prefix_command(message):
         return
     # Do not call process_commands here: the callbacks above are already
@@ -423,6 +606,193 @@ async def song_autocomplete(interaction: discord.Interaction, current: str):
 # ============================================================
 # 100+ SLASH COMMANDS
 # ============================================================
+
+
+# ============================================================
+# PROFESSIONAL SECURITY / MODERATION CONTROL
+# ============================================================
+
+def _require_staff(interaction):
+    return _is_staff(interaction.user)
+
+@bot.tree.command(name="security", description="🛡️ Show anti-spam/security controls")
+async def security(interaction: discord.Interaction):
+    if not _require_staff(interaction):
+        await interaction.response.send_message("❌ Staff only.", ephemeral=True)
+        return
+    s = security_settings(interaction.guild_id)
+    await interaction.response.send_message(
+        "🛡️ **Security Control Panel**\n"
+        f"• Spam: `{s['spam_limit']} messages / {int(s['spam_window'])}s` → `{s['first_timeout']//60}m` timeout\n"
+        f"• Repeat messages: `{s['duplicate_limit']}`\n"
+        f"• Mention limit: `{s['mention_limit']}`\n"
+        f"• Delete Discord invites: `{s['delete_invites']}`\n"
+        f"• YouTube-only links: `{s['youtube_only']}`\n"
+        f"• External-link blocking: `{s['delete_external_links']}`\n"
+        f"• Log channel: `{s['log_channel_id'] or 'not set'}`",
+        ephemeral=True,
+    )
+
+@bot.tree.command(name="antispam", description="🛡️ Configure strong anti-spam")
+@app_commands.describe(
+    limit="Messages allowed during the window (default 5)",
+    window="Window in seconds (default 5)",
+)
+async def antispam(interaction: discord.Interaction, limit: Optional[int] = 5, window: Optional[int] = 5):
+    if not _require_staff(interaction):
+        await interaction.response.send_message("❌ Staff only.", ephemeral=True)
+        return
+    if limit is None or window is None or not 1 <= limit <= 50 or not 1 <= window <= 60:
+        await interaction.response.send_message("❌ Limit: 1-50 and window: 1-60 seconds.", ephemeral=True)
+        return
+    s = security_settings(interaction.guild_id)
+    s["spam_limit"] = limit
+    s["spam_window"] = float(window)
+    await interaction.response.send_message(
+        f"🛡️ Anti-spam set to **{limit} messages / {window}s**. "
+        f"At the first violation the member gets **5 minutes timeout**.",
+        ephemeral=True,
+    )
+
+@bot.tree.command(name="youtube_links", description="🎬 Allow only YouTube video links")
+@app_commands.describe(enabled="True = only YouTube links are allowed when a URL is posted")
+async def youtube_links(interaction: discord.Interaction, enabled: bool):
+    if not _require_staff(interaction):
+        await interaction.response.send_message("❌ Staff only.", ephemeral=True)
+        return
+    security_settings(interaction.guild_id)["youtube_only"] = enabled
+    await interaction.response.send_message(
+        f"🎬 YouTube link control: **{'ON' if enabled else 'OFF'}**",
+        ephemeral=True,
+    )
+
+@bot.tree.command(name="link_control", description="🔗 Configure invite/external link protection")
+@app_commands.describe(
+    invites="Delete Discord invite links",
+    external="Delete non-YouTube external links",
+)
+async def link_control(interaction: discord.Interaction, invites: bool = True, external: bool = False):
+    if not _require_staff(interaction):
+        await interaction.response.send_message("❌ Staff only.", ephemeral=True)
+        return
+    s = security_settings(interaction.guild_id)
+    s["delete_invites"] = invites
+    s["delete_external_links"] = external
+    await interaction.response.send_message(
+        f"🔗 Link security updated — invites: `{invites}`, external links: `{external}`",
+        ephemeral=True,
+    )
+
+@bot.tree.command(name="security_log", description="📋 Set the security log channel")
+@app_commands.describe(channel="Channel where moderation/security events are logged")
+async def security_log(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not _require_staff(interaction):
+        await interaction.response.send_message("❌ Staff only.", ephemeral=True)
+        return
+    security_settings(interaction.guild_id)["log_channel_id"] = channel.id
+    await interaction.response.send_message(
+        f"📋 Security logs will be sent to {channel.mention}.", ephemeral=True
+    )
+
+@bot.tree.command(name="clear", description="🧹 Delete recent messages")
+@app_commands.describe(amount="Number of recent messages to delete (1-100)")
+async def clear(interaction: discord.Interaction, amount: int):
+    if not interaction.user.guild_permissions.manage_messages:
+        await interaction.response.send_message("❌ Manage Messages permission required.", ephemeral=True)
+        return
+    if not 1 <= amount <= 100:
+        await interaction.response.send_message("❌ Amount must be 1-100.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    try:
+        deleted = await interaction.channel.purge(limit=amount)
+        await interaction.followup.send(f"🧹 Deleted **{len(deleted)}** messages.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.followup.send("❌ I need **Manage Messages** permission.", ephemeral=True)
+
+@bot.tree.command(name="mute", description="🔇 Timeout a member")
+@app_commands.describe(member="Member to timeout", minutes="Timeout duration in minutes")
+async def mute(interaction: discord.Interaction, member: discord.Member, minutes: int = 5):
+    if not interaction.user.guild_permissions.moderate_members:
+        await interaction.response.send_message("❌ Moderate Members permission required.", ephemeral=True)
+        return
+    if member == interaction.user or _is_protected(member):
+        await interaction.response.send_message("❌ You cannot mute this member.", ephemeral=True)
+        return
+    if not 1 <= minutes <= 40320:
+        await interaction.response.send_message("❌ Duration must be 1-40320 minutes.", ephemeral=True)
+        return
+    ok = await _timeout_member(member, minutes * 60, f"Manual mute by {interaction.user}")
+    await interaction.response.send_message(
+        f"{'🔇 Muted' if ok else '❌ Could not mute'} {member.mention} for `{minutes}m`."
+    )
+
+@bot.tree.command(name="unmute", description="🔊 Remove a member timeout")
+async def unmute(interaction: discord.Interaction, member: discord.Member):
+    if not interaction.user.guild_permissions.moderate_members:
+        await interaction.response.send_message("❌ Moderate Members permission required.", ephemeral=True)
+        return
+    try:
+        await member.timeout(None, reason=f"Manual unmute by {interaction.user}")
+        await interaction.response.send_message(f"🔊 Unmuted {member.mention}.")
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ I cannot modify this member.", ephemeral=True)
+
+@bot.tree.command(name="warn", description="⚠️ Warn a member")
+@app_commands.describe(member="Member to warn", reason="Reason for the warning")
+async def warn(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason provided"):
+    if not _require_staff(interaction):
+        await interaction.response.send_message("❌ Staff only.", ephemeral=True)
+        return
+    if _is_protected(member):
+        await interaction.response.send_message("❌ You cannot warn this member.", ephemeral=True)
+        return
+    key = (interaction.guild_id, member.id)
+    count = bot.warnings.get(key, 0) + 1
+    bot.warnings[key] = count
+    await _send_security_log(
+        interaction.guild,
+        f"⚠️ Warning | {member.mention} | warning `{count}` | {reason}"
+    )
+    await interaction.response.send_message(
+        f"⚠️ {member.mention} warned. Total warnings: `{count}`."
+    )
+
+@bot.tree.command(name="lockdown", description="🔒 Lock the current channel")
+async def lockdown(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.response.send_message("❌ Manage Channels permission required.", ephemeral=True)
+        return
+    overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
+    overwrite.send_messages = False
+    try:
+        await interaction.channel.set_permissions(
+            interaction.guild.default_role,
+            overwrite=overwrite,
+            reason=f"Lockdown by {interaction.user}",
+        )
+        bot.lockdown_channels.add(interaction.channel.id)
+        await interaction.response.send_message("🔒 **Channel locked.**")
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ I need Manage Channels permission.", ephemeral=True)
+
+@bot.tree.command(name="unlockdown", description="🔓 Unlock the current channel")
+async def unlockdown(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.response.send_message("❌ Manage Channels permission required.", ephemeral=True)
+        return
+    overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
+    overwrite.send_messages = None
+    try:
+        await interaction.channel.set_permissions(
+            interaction.guild.default_role,
+            overwrite=overwrite,
+            reason=f"Unlockdown by {interaction.user}",
+        )
+        bot.lockdown_channels.discard(interaction.channel.id)
+        await interaction.response.send_message("🔓 **Channel unlocked.**")
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ I need Manage Channels permission.", ephemeral=True)
 
 # ===== 1. PLAY =====
 @bot.tree.command(name='play', description='🎵 Play a song or add to queue')
