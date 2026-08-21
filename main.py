@@ -615,84 +615,100 @@ async def song_autocomplete(interaction: discord.Interaction, current: str):
 def _require_staff(interaction):
     return _is_staff(interaction.user)
 
-@bot.tree.command(name="security", description="🛡️ Show anti-spam/security controls")
-async def security(interaction: discord.Interaction):
-    if not _require_staff(interaction):
-        await interaction.response.send_message("❌ Staff only.", ephemeral=True)
-        return
-    s = security_settings(interaction.guild_id)
-    await interaction.response.send_message(
-        "🛡️ **Security Control Panel**\n"
-        f"• Spam: `{s['spam_limit']} messages / {int(s['spam_window'])}s` → `{s['first_timeout']//60}m` timeout\n"
-        f"• Repeat messages: `{s['duplicate_limit']}`\n"
-        f"• Mention limit: `{s['mention_limit']}`\n"
-        f"• Delete Discord invites: `{s['delete_invites']}`\n"
-        f"• YouTube-only links: `{s['youtube_only']}`\n"
-        f"• External-link blocking: `{s['delete_external_links']}`\n"
-        f"• Log channel: `{s['log_channel_id'] or 'not set'}`",
-        ephemeral=True,
-    )
-
-@bot.tree.command(name="antispam", description="🛡️ Configure strong anti-spam")
+@bot.tree.command(name="security", description="🛡️ Professional security control panel")
 @app_commands.describe(
-    limit="Messages allowed during the window (default 5)",
-    window="Window in seconds (default 5)",
-)
-async def antispam(interaction: discord.Interaction, limit: Optional[int] = 5, window: Optional[int] = 5):
-    if not _require_staff(interaction):
-        await interaction.response.send_message("❌ Staff only.", ephemeral=True)
-        return
-    if limit is None or window is None or not 1 <= limit <= 50 or not 1 <= window <= 60:
-        await interaction.response.send_message("❌ Limit: 1-50 and window: 1-60 seconds.", ephemeral=True)
-        return
-    s = security_settings(interaction.guild_id)
-    s["spam_limit"] = limit
-    s["spam_window"] = float(window)
-    await interaction.response.send_message(
-        f"🛡️ Anti-spam set to **{limit} messages / {window}s**. "
-        f"At the first violation the member gets **5 minutes timeout**.",
-        ephemeral=True,
-    )
-
-@bot.tree.command(name="youtube_links", description="🎬 Allow only YouTube video links")
-@app_commands.describe(enabled="True = only YouTube links are allowed when a URL is posted")
-async def youtube_links(interaction: discord.Interaction, enabled: bool):
-    if not _require_staff(interaction):
-        await interaction.response.send_message("❌ Staff only.", ephemeral=True)
-        return
-    security_settings(interaction.guild_id)["youtube_only"] = enabled
-    await interaction.response.send_message(
-        f"🎬 YouTube link control: **{'ON' if enabled else 'OFF'}**",
-        ephemeral=True,
-    )
-
-@bot.tree.command(name="link_control", description="🔗 Configure invite/external link protection")
-@app_commands.describe(
+    action="Control to view/change",
+    limit="Anti-spam message limit (default 5)",
+    window="Anti-spam window in seconds (default 5)",
+    enabled="Enable/disable the selected toggle",
     invites="Delete Discord invite links",
     external="Delete non-YouTube external links",
+    channel="Security log channel",
 )
-async def link_control(interaction: discord.Interaction, invites: bool = True, external: bool = False):
+@app_commands.choices(action=[
+    app_commands.Choice(name="status", value="status"),
+    app_commands.Choice(name="antispam", value="antispam"),
+    app_commands.Choice(name="youtube", value="youtube"),
+    app_commands.Choice(name="links", value="links"),
+    app_commands.Choice(name="log", value="log"),
+])
+async def security(
+    interaction: discord.Interaction,
+    action: app_commands.Choice[str],
+    limit: Optional[int] = None,
+    window: Optional[int] = None,
+    enabled: Optional[bool] = None,
+    invites: Optional[bool] = None,
+    external: Optional[bool] = None,
+    channel: Optional[discord.TextChannel] = None,
+):
     if not _require_staff(interaction):
         await interaction.response.send_message("❌ Staff only.", ephemeral=True)
         return
-    s = security_settings(interaction.guild_id)
-    s["delete_invites"] = invites
-    s["delete_external_links"] = external
-    await interaction.response.send_message(
-        f"🔗 Link security updated — invites: `{invites}`, external links: `{external}`",
-        ephemeral=True,
-    )
 
-@bot.tree.command(name="security_log", description="📋 Set the security log channel")
-@app_commands.describe(channel="Channel where moderation/security events are logged")
-async def security_log(interaction: discord.Interaction, channel: discord.TextChannel):
-    if not _require_staff(interaction):
-        await interaction.response.send_message("❌ Staff only.", ephemeral=True)
+    s = security_settings(interaction.guild_id)
+    action_name = action.value
+
+    if action_name == "status":
+        await interaction.response.send_message(
+            "🛡️ **Security Control Panel**\n"
+            f"• Spam: `{s['spam_limit']} messages / {int(s['spam_window'])}s` → `{s['first_timeout']//60}m` timeout\n"
+            f"• Repeat messages: `{s['duplicate_limit']}`\n"
+            f"• Mention limit: `{s['mention_limit']}`\n"
+            f"• Delete Discord invites: `{s['delete_invites']}`\n"
+            f"• YouTube-only links: `{s['youtube_only']}`\n"
+            f"• External-link blocking: `{s['delete_external_links']}`\n"
+            f"• Log channel: `{s['log_channel_id'] or 'not set'}`",
+            ephemeral=True,
+        )
         return
-    security_settings(interaction.guild_id)["log_channel_id"] = channel.id
-    await interaction.response.send_message(
-        f"📋 Security logs will be sent to {channel.mention}.", ephemeral=True
-    )
+
+    if action_name == "antispam":
+        limit = 5 if limit is None else limit
+        window = 5 if window is None else window
+        if not 1 <= limit <= 50 or not 1 <= window <= 60:
+            await interaction.response.send_message("❌ Limit: 1-50 and window: 1-60 seconds.", ephemeral=True)
+            return
+        s["spam_limit"] = limit
+        s["spam_window"] = float(window)
+        await interaction.response.send_message(
+            f"🛡️ Anti-spam set to **{limit} messages / {window}s**. "
+            f"First violation = **5 minutes timeout**.",
+            ephemeral=True,
+        )
+        return
+
+    if action_name == "youtube":
+        if enabled is None:
+            await interaction.response.send_message("❌ Set `enabled` to True or False.", ephemeral=True)
+            return
+        s["youtube_only"] = enabled
+        await interaction.response.send_message(
+            f"🎬 YouTube-only link control: **{'ON' if enabled else 'OFF'}**",
+            ephemeral=True,
+        )
+        return
+
+    if action_name == "links":
+        if invites is not None:
+            s["delete_invites"] = invites
+        if external is not None:
+            s["delete_external_links"] = external
+        await interaction.response.send_message(
+            f"🔗 Link security — invites: `{s['delete_invites']}`, "
+            f"external: `{s['delete_external_links']}`",
+            ephemeral=True,
+        )
+        return
+
+    if action_name == "log":
+        if channel is None:
+            await interaction.response.send_message("❌ Select a log channel.", ephemeral=True)
+            return
+        s["log_channel_id"] = channel.id
+        await interaction.response.send_message(
+            f"📋 Security logs will be sent to {channel.mention}.", ephemeral=True
+        )
 
 @bot.tree.command(name="clear", description="🧹 Delete recent messages")
 @app_commands.describe(amount="Number of recent messages to delete (1-100)")
@@ -2116,17 +2132,7 @@ async def botinfo(interaction: discord.Interaction):
         f"Uptime: `{int(time.time() - bot.start_time)}s`"
     )
 
-@bot.tree.command(name='membercount', description='👥 Show server member count')
-async def membercount(interaction: discord.Interaction):
-    await interaction.response.send_message(f"👥 **Members:** `{interaction.guild.member_count}`")
 
-@bot.tree.command(name='channelcount', description='📺 Show server channel count')
-async def channelcount(interaction: discord.Interaction):
-    await interaction.response.send_message(f"📺 **Channels:** `{len(interaction.guild.channels)}`")
-
-@bot.tree.command(name='rolecount', description='🏷 Show server role count')
-async def rolecount(interaction: discord.Interaction):
-    await interaction.response.send_message(f"🏷 **Roles:** `{len(interaction.guild.roles)}`")
 
 @bot.tree.command(name='history_clear', description='🧹 Clear this server playback history')
 async def history_clear(interaction: discord.Interaction):
@@ -2147,20 +2153,6 @@ async def playlist_clear(interaction: discord.Interaction, name: str):
     playlists[name] = []
     await interaction.response.send_message(f"🧹 **Playlist cleared:** '{name}'")
 
-@bot.tree.command(name='playlist_count', description='📁 Show number of your playlists')
-async def playlist_count(interaction: discord.Interaction):
-    count = len(bot.playlists.get(interaction.user.id, {}))
-    await interaction.response.send_message(f"📁 **Playlists:** `{count}`", ephemeral=True)
-
-@bot.tree.command(name='favorite_count', description='⭐ Show number of your favorites')
-async def favorite_count(interaction: discord.Interaction):
-    count = len(bot.favorites.get(interaction.user.id, []))
-    await interaction.response.send_message(f"⭐ **Favorites:** `{count}`", ephemeral=True)
-
-@bot.tree.command(name='queue_count', description='📋 Show number of queued songs')
-async def queue_count(interaction: discord.Interaction):
-    count = len(bot.queues.get(interaction.guild_id, []))
-    await interaction.response.send_message(f"📋 **Queued songs:** `{count}`")
 
 @bot.tree.command(name='clear_nowplaying', description='🧹 Clear current-song display')
 async def clear_nowplaying(interaction: discord.Interaction):
@@ -2190,13 +2182,6 @@ async def queue_clear_after(interaction: discord.Interaction):
     bot.queues[interaction.guild_id] = []
     await interaction.response.send_message("🧹 **Upcoming queue cleared**")
 
-@bot.tree.command(name='volume_reset', description='🔊 Reset volume to default')
-async def volume_reset(interaction: discord.Interaction):
-    vc = get_vc(interaction.guild_id)
-    if not vc or not vc.source or not hasattr(vc.source, 'volume'):
-        await interaction.response.send_message("❌ No active audio source", ephemeral=True); return
-    vc.source.volume = DEFAULT_VOLUME
-    await interaction.response.send_message(f"🔊 **Volume reset:** `{int(DEFAULT_VOLUME * 100)}%`")
 
 async def uptime_seconds(interaction: discord.Interaction):
     await interaction.response.send_message(f"⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds")
