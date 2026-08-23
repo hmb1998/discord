@@ -10,9 +10,12 @@ import random
 import json
 import time
 import datetime
+import logging
+from collections import defaultdict, deque
 from typing import Optional
 from flask import Flask
-from config import TOKEN, DEFAULT_VOLUME, RICH_PRESENCE_ASSET_KEY
+from config import TOKEN, DEFAULT_VOLUME, RICH_PRESENCE_ASSET_KEY, DB_PATH
+from storage import SQLiteStorage
 
 app = Flask(__name__)
 
@@ -48,15 +51,57 @@ class MusicBot(commands.Bot):
         self.spam_last_message = {}   # (guild_id, user_id) -> (normalized text, count, timestamp)
         self.warnings = {}            # (guild_id, user_id) -> warning count
         self.lockdown_channels = set()
+        self.storage = SQLiteStorage(DB_PATH)
+        self._persistence_task = None
 
 
     async def setup_hook(self):
         print("✅ Syncing slash commands...")
         await self.tree.sync()
         print(f"✅ {len(self.tree.get_commands())} Slash Commands loaded!")
+        self.storage.load_into(self)
+        self._persistence_task = asyncio.create_task(self._persistence_loop())
+
+    async def _persistence_loop(self):
+        while not self.is_closed():
+            await asyncio.sleep(30)
+            try:
+                self.storage.save_from(self)
+            except Exception as exc:
+                logging.getLogger("hmb.persistence").exception("Persistence save failed: %s", exc)
+
+    async def close(self):
+        try:
+            self.storage.save_from(self)
+        except Exception as exc:
+            logging.getLogger("hmb.persistence").exception("Final persistence save failed: %s", exc)
+        if self._persistence_task and not self._persistence_task.done():
+            self._persistence_task.cancel()
+        await super().close()
 
 bot = MusicBot()
 bot.remove_command('help')
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    """Return a friendly response instead of exposing internal tracebacks."""
+    if isinstance(error, app_commands.CommandOnCooldown):
+        message = f"⏳ Please wait {error.retry_after:.1f}s before using this command again."
+    elif isinstance(error, app_commands.MissingPermissions):
+        message = "🛡️ You do not have permission to use this command."
+    elif isinstance(error, app_commands.CheckFailure):
+        message = "❌ You cannot use this command here."
+    else:
+        logging.getLogger("hmb.commands").exception("Slash command failed", exc_info=error)
+        message = "❌ Something went wrong while running that command."
+
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except (discord.HTTPException, discord.Forbidden):
+        pass
 
 # Rich Presence configuration.
 # The asset key must match the key shown by Discord Developer Portal ->
@@ -106,14 +151,12 @@ async def on_ready():
 # ---------------------------------------------------------------------------
 # Professional moderation / security
 # ---------------------------------------------------------------------------
-from collections import defaultdict, deque
-
 DEFAULT_SECURITY = {
-    "spam_window": 5.0,
-    "spam_limit": 5,                 # 5 messages in 5 seconds => timeout
-    "first_timeout": 5 * 60,
-    "second_timeout": 10 * 60,
-    "third_timeout": 60 * 60,
+    "spam_window": float(os.getenv("ANTISPAM_WINDOW", "5")),
+    "spam_limit": int(os.getenv("ANTISPAM_MAX_MESSAGES", "5")),                 # 5 messages in 5 seconds => timeout
+    "first_timeout": int(os.getenv("ANTISPAM_TIMEOUT_1", "300")),
+    "second_timeout": int(os.getenv("ANTISPAM_TIMEOUT_2", "600")),
+    "third_timeout": int(os.getenv("ANTISPAM_TIMEOUT_3", "3600")),
     "max_timeout": 24 * 60 * 60,
     "duplicate_limit": 3,
     "mention_limit": 5,
@@ -555,8 +598,8 @@ async def play_next(guild_id):
         fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
         try:
             fut.result()
-        except:
-            pass
+        except Exception as exc:
+            print(f"Playback callback error: {type(exc).__name__}: {exc}")
 
     try:
         with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
@@ -571,6 +614,10 @@ async def play_next(guild_id):
         print(f"Error in playback: {e}")
         coro = play_next(guild_id)
         fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
+        try:
+            fut.result(timeout=30)
+        except Exception as exc:
+            print(f"Playback recovery error: {type(exc).__name__}: {exc}")
 
 # Bot readiness is handled by the Rich Presence on_ready handler above.
 
@@ -1055,7 +1102,7 @@ async def shuffle(interaction: discord.Interaction):
     current = bot.shuffle_mode.get(guild_id, False)
     bot.shuffle_mode[guild_id] = not current
     
-    if bot.shuffle_mode[guild_id] and guild_id in bot.queues:
+    if bot.shuffle_mode.get(guild_id, False) and guild_id in bot.queues:
         random.shuffle(bot.queues[guild_id])
     
     await interaction.response.send_message(f"🔀 **Shuffle:** {'ON' if bot.shuffle_mode[guild_id] else 'OFF'}")

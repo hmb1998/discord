@@ -1,3 +1,21 @@
+## 🔐 Token Setup — Fly.io
+
+This project uses environment variables for the Discord bot token.
+
+Set the following **Fly.io Secret**:
+
+```text
+DISCORD_TOKEN=YOUR_DISCORD_BOT_TOKEN
+```
+
+Do **not** put the real token in `config.py`, `.env.example`, `README.md`, or GitHub.
+
+The bot reads the token with:
+
+```python
+TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("TOKEN")
+```
+
 # 🎵 HMB GLOBAL
 
 > **HMB GLOBAL — Smart • Secure • Powerful Discord Music Bot**
@@ -133,6 +151,7 @@ The project currently contains **100 Slash Commands** covering music, playlists,
 ```text
 discord-main/
 ├── main.py
+├── storage.py
 ├── config.py
 ├── requirements.txt
 ├── .env.example
@@ -154,6 +173,9 @@ The main application file containing the bot logic, commands, music system, queu
 
 ### ⚙️ `config.py`
 Central configuration for important bot settings such as token-related configuration, default volume, and Rich Presence settings.
+
+### 💾 Persistence
+The bot includes a lightweight SQLite persistence layer for playlists, favorites, playback history, warnings, security settings, and player preferences. Live Discord voice connections are intentionally kept in memory.
 
 ### 📦 `requirements.txt`
 Contains the Python dependencies required to run the project.
@@ -275,7 +297,7 @@ From music and playlists to moderation, security, and server utilities, HMB brin
 
 ---
 
-## 👑 HMB GLOBAL GLOBAL
+## 👑 HMB GLOBAL
 
 **HMB GLOBAL**  
 Professional • Powerful • Fast • Secure
@@ -287,3 +309,7 @@ Made for Discord communities that want music, moderation, security, and utility 
 ### ⚠️ Disclaimer
 
 This README describes the project based on the provided source package. Exact behavior can depend on Discord API changes, dependency versions, external music providers, deployment environment, and the bot's configuration.
+
+## 🧪 Quality Checks
+
+The project includes automated checks for Python syntax, the expected **100 Slash Commands**, branding consistency, and SQLite persistence round-trips. GitHub Actions runs these checks on pushes and pull requests.

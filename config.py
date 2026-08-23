@@ -1,10 +1,9 @@
-"""Environment-based configuration for the Discord music bot."""
+"""HMB GLOBAL configuration."""
 import os
 
 TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("TOKEN")
 DEFAULT_VOLUME = float(os.getenv("DEFAULT_VOLUME", "0.50"))
 
-# Discord Developer Portal -> Rich Presence -> Assets.
 RICH_PRESENCE_ASSET_KEY = (
     os.getenv("ASSET_KEY")
     or os.getenv("RICH_PRESENCE_ASSET_KEY")
@@ -13,5 +12,5 @@ RICH_PRESENCE_ASSET_KEY = (
 
 if not TOKEN:
     raise RuntimeError(
-        "Missing Discord bot token. Set the DISCORD_TOKEN environment variable."
+        "Missing Discord bot token. Set DISCORD_TOKEN in Fly.io Secrets."
     )

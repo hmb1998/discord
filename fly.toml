@@ -4,8 +4,15 @@ primary_region = "fra"
 [build]
 
 [env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
 
 [vm]
-memory = "1024mb"
-cpu_kind = "shared"
-cpus = 1
+  memory = "1024mb"
+  cpu_kind = "shared"
+  cpus = 1
