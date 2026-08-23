@@ -15,6 +15,10 @@ primary_region = "fra"
   guest_path = "/app/cookies.txt"
   secret_name = "YOUTUBE_COOKIE_FILE"
 
+[[mounts]]
+  source = "hmb_data"
+  destination = "/app/data"
+
 [http_service]
   internal_port = 8080
   force_https = true
