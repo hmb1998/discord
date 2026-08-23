@@ -3,6 +3,7 @@ import os
 
 TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("TOKEN")
 DEFAULT_VOLUME = float(os.getenv("DEFAULT_VOLUME", "0.50"))
+DB_PATH = os.getenv("DB_PATH", "/app/data/hmb_global.sqlite3")
 
 RICH_PRESENCE_ASSET_KEY = (
     os.getenv("ASSET_KEY")

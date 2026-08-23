@@ -1,3 +1,13 @@
+## 💾 Fly.io Database
+
+The bot stores persistent HMB GLOBAL data in:
+
+```text
+/app/data/hmb_global.sqlite3
+```
+
+`DB_PATH` is configured automatically and can be overridden with a Fly.io environment variable.
+
 ## 🔐 Token Setup — Fly.io
 
 This project uses environment variables for the Discord bot token.
