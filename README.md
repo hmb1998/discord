@@ -1,6 +1,6 @@
 ## 💾 Fly.io Database
 
-The bot stores persistent HMB GLOBAL data in:
+The bot stores HMB GLOBAL data locally at:
 
 ```text
 /app/data/hmb_global.sqlite3
@@ -323,3 +323,6 @@ This README describes the project based on the provided source package. Exact be
 ## 🧪 Quality Checks
 
 The project includes automated checks for Python syntax, the expected **100 Slash Commands**, branding consistency, and SQLite persistence round-trips. GitHub Actions runs these checks on pushes and pull requests.
+
+
+> **Storage note:** This version is configured to deploy without a pre-created Fly.io volume. SQLite works at `/app/data/hmb_global.sqlite3`, but local data is not guaranteed to survive machine replacement or redeploy. Create and mount a Fly volume later if persistent storage is required.
