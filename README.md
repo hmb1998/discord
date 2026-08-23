@@ -1,6 +1,11 @@
-# 🎵 HMB Music Bot
+# 🎵 HMB GLOBAL
 
-> **HMB Music Bot — Professional Discord Music, Moderation & Server Utility Bot**
+> **HMB GLOBAL — Smart • Secure • Powerful Discord Music Bot**
+
+**🎧 Your Music. Your Way.**  
+**⚡ Fast & Reliable • 📋 Queue & Playlists • 🔊 Volume Control • 🛡️ Security • 🎛️ Audio Effects**  
+**🌐 24/7 Music Experience**
+
 
 A powerful Discord bot built with **Python + discord.py**, designed to combine high-quality music playback, queue management, playlists, favorites, history, audio effects, moderation, security tools, and server utilities in one professional package.
 
@@ -9,7 +14,7 @@ A powerful Discord bot built with **Python + discord.py**, designed to combine h
 ## ✨ Features
 
 ### 🎶 Music System
-HMB Music Bot provides a complete music experience for your Discord server:
+HMB GLOBAL provides a complete music experience for your Discord server:
 
 - ▶️ Play music from supported sources
 - ⏸️ Pause / ▶️ Resume
@@ -239,7 +244,7 @@ The project is built around:
 
 ## 💎 What HMB Can Do
 
-HMB Music Bot is designed as an **all-in-one Discord bot** rather than a simple music player.
+HMB GLOBAL is designed as an **all-in-one Discord bot** rather than a simple music player.
 
 It can:
 
@@ -262,7 +267,7 @@ Use utility and moderation commands for everyday Discord server management.
 
 ## 🌟 HMB Philosophy
 
-HMB Music Bot is built with one goal:
+HMB GLOBAL is built with one goal:
 
 > **One bot. One system. Complete Discord control.**
 
@@ -270,9 +275,9 @@ From music and playlists to moderation, security, and server utilities, HMB brin
 
 ---
 
-## 👑 HMB Music Bot
+## 👑 HMB GLOBAL GLOBAL
 
-**HMB Music Bot**  
+**HMB GLOBAL**  
 Professional • Powerful • Fast • Secure
 
 Made for Discord communities that want music, moderation, security, and utility features in one place.
