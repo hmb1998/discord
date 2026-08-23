@@ -239,7 +239,7 @@ The project is built around:
 
 ## 💎 What HMB Can Do
 
-HMB is designed as an **all-in-one Discord bot** rather than a simple music player.
+HMB Music Bot is designed as an **all-in-one Discord bot** rather than a simple music player.
 
 It can:
 
@@ -262,7 +262,7 @@ Use utility and moderation commands for everyday Discord server management.
 
 ## 🌟 HMB Philosophy
 
-HMB is built with one goal:
+HMB Music Bot is built with one goal:
 
 > **One bot. One system. Complete Discord control.**
 
@@ -270,7 +270,7 @@ From music and playlists to moderation, security, and server utilities, HMB brin
 
 ---
 
-## 👑 HMB
+## 👑 HMB Music Bot
 
 **HMB Music Bot**  
 Professional • Powerful • Fast • Secure
