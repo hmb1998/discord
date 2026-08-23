@@ -1,5 +1,5 @@
 app = "hmb-global-bot"
-primary_region = "fra"
+primary_region = "ams"
 
 [build]
 
