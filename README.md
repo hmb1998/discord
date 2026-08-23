@@ -324,31 +324,22 @@ This README describes the project based on the provided source package. Exact be
 
 The project includes automated checks for Python syntax, the expected **100 Slash Commands**, branding consistency, and SQLite persistence round-trips. GitHub Actions runs these checks on pushes and pull requests.
 
-## 🚀 Production Deployment
+## 🚀 Fly.io Deployment
 
-This release is configured for production deployment on Fly.io.
+This version is configured to deploy **without a Fly.io volume**.
 
-### Persistent SQLite
-The database path is:
+The SQLite database uses:
 
 ```text
 /app/data/hmb_global.sqlite3
 ```
 
-The production `fly.toml` mounts a Fly volume named `hmb_data` at `/app/data`.
-**The volume must exist in the `fra` region before deployment.** If Fly.io reports that the process group needs a volume, create `hmb_data` in `fra` and redeploy.
+The directory is created by the application as needed. Because there is no persistent Fly volume in this version, SQLite data is **not guaranteed to survive a machine replacement or redeploy**.
 
-### Health check
-Fly.io checks:
+Set the real Discord token only as a Fly.io secret:
 
 ```text
-GET /healthz
+DISCORD_TOKEN
 ```
 
-A healthy response is returned when the HTTP service is running.
-
-### Production HTTP server
-Flask is served through **Waitress** instead of Flask's development server.
-
-### Secrets
-Set `DISCORD_TOKEN` as a Fly.io secret. Never commit the real token.
+Never commit a real bot token to GitHub.

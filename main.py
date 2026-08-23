@@ -19,6 +19,17 @@ from storage import SQLiteStorage
 
 app = Flask(__name__)
 
+YOUTUBE_COOKIE = os.getenv("YOUTUBE_COOKIE", "").strip()
+
+def build_ydl_options(**overrides):
+    """Build yt-dlp options with optional Fly.io YouTube cookie support."""
+    options = dict(YDL_OPTIONS)
+    if YOUTUBE_COOKIE:
+        options["cookiefile"] = "/tmp/hmb_youtube_cookies.txt"
+    options.update(overrides)
+    return options
+
+
 @app.route("/")
 def home():
     return "HMB GLOBAL is online — 100 slash commands + ! prefix aliases."
@@ -494,7 +505,7 @@ YDL_OPTIONS = {
 }
 
 def search_youtube(query):
-    with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+    with yt_dlp.YoutubeDL(build_ydl_options()) as ydl:
         try:
             if re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/', query):
                 info = ydl.extract_info(query, download=False)
@@ -611,7 +622,7 @@ async def play_next(guild_id):
             print(f"Playback callback error: {type(exc).__name__}: {exc}")
 
     try:
-        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+        with yt_dlp.YoutubeDL(build_ydl_options()) as ydl:
             info = ydl.extract_info(song['url'], download=False)
             audio_url = info['url']
 
@@ -1151,7 +1162,7 @@ async def seek(interaction: discord.Interaction, seconds: int):
     # Restart playback at position - we need to recreate the source
     vc.stop()
     try:
-        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+        with yt_dlp.YoutubeDL(build_ydl_options()) as ydl:
             info = ydl.extract_info(song['url'], download=False)
             audio_url = info['url']
         
@@ -1227,7 +1238,7 @@ async def disconnect(interaction: discord.Interaction):
 async def search(interaction: discord.Interaction, query: str):
     await interaction.response.defer()
     
-    with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+    with yt_dlp.YoutubeDL(build_ydl_options()) as ydl:
         try:
             results = ydl.extract_info(f"ytsearch5:{query}", download=False)
             if not results or 'entries' not in results or len(results['entries']) == 0:
@@ -2242,7 +2253,36 @@ async def queue_clear_after(interaction: discord.Interaction):
 async def uptime_seconds(interaction: discord.Interaction):
     await interaction.response.send_message(f"⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds")
 
+def _prepare_youtube_cookie_file():
+    """Materialize the Fly.io YOUTUBE_COOKIE secret only in the container."""
+    if not YOUTUBE_COOKIE:
+        return
+    cookie_path = "/tmp/hmb_youtube_cookies.txt"
+    # Accept either a Netscape cookie file supplied as the secret or a raw
+    # cookie header (name=value; name2=value2) and convert the latter.
+    if YOUTUBE_COOKIE.startswith("# Netscape HTTP Cookie File"):
+        content = YOUTUBE_COOKIE
+    else:
+        lines = ["# Netscape HTTP Cookie File"]
+        for item in YOUTUBE_COOKIE.split(";"):
+            item = item.strip()
+            if not item or "=" not in item:
+                continue
+            name, value = item.split("=", 1)
+            lines.append(
+                f".youtube.com\tTRUE\t/\tTRUE\t0\t{name.strip()}\t{value.strip()}"
+            )
+        content = "\n".join(lines) + "\n"
+    with open(cookie_path, "w", encoding="utf-8") as fh:
+        fh.write(content)
+    try:
+        os.chmod(cookie_path, 0o600)
+    except OSError:
+        pass
+
+
 if __name__ == '__main__':
+    _prepare_youtube_cookie_file()
     # Fly.io health endpoint. Waitress serves Flask in a background thread
     # while the Discord gateway owns the main thread.
     import threading

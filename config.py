@@ -27,6 +27,8 @@ DB_PATH = os.getenv("DB_PATH", "/app/data/hmb_global.sqlite3").strip()
 if not DB_PATH:
     DB_PATH = "/app/data/hmb_global.sqlite3"
 
+YOUTUBE_COOKIE = os.getenv("YOUTUBE_COOKIE", "").strip()
+
 RICH_PRESENCE_ASSET_KEY = (
     os.getenv("ASSET_KEY")
     or os.getenv("RICH_PRESENCE_ASSET_KEY")
