@@ -365,4 +365,4 @@ Set the real Discord token only as a Fly.io secret:
 DISCORD_TOKEN
 ```
 
-Never commit a real bot token to GitHub.
+Never commit a real bot token to GitHub.98
