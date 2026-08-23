@@ -1,124 +1,284 @@
-# 🎵 Discord Music Bot
+# 🎵 HMB Music Bot
 
-A Discord music bot that plays audio from YouTube and supports **both slash commands and `!` prefix commands**.
+> **HMB Music Bot — Professional Discord Music, Moderation & Server Utility Bot**
+
+A powerful Discord bot built with **Python + discord.py**, designed to combine high-quality music playback, queue management, playlists, favorites, history, audio effects, moderation, security tools, and server utilities in one professional package.
+
+---
 
 ## ✨ Features
 
-- ▶️ Play music from YouTube (URL or search)
-- 📋 Queue, skip, pause, resume and stop
-- 🔀 Shuffle and loop controls
-- ⭐ Favorites and playlists
-- 🎚️ Volume and audio presets
-- 📝 Lyrics/search helpers
-- 📥 Queue/history utilities
-- 🌐 Fly.io health endpoint
-- 🔒 Token is read from an environment variable — never put it in source code
+### 🎶 Music System
+HMB Music Bot provides a complete music experience for your Discord server:
 
-## Commands
+- ▶️ Play music from supported sources
+- ⏸️ Pause / ▶️ Resume
+- ⏭️ Skip tracks
+- ⏹️ Stop playback
+- 🔊 Volume control
+- 📜 Queue management
+- 🎵 Now Playing
+- 🔎 Music search
+- 🔁 Loop / Repeat
+- 🔀 Shuffle
+- ⏩ Seek / Forward
+- ⏪ Rewind
+- 🔄 Restart current track
+- 🎚️ Queue reordering and cleanup
+- 🎧 Voice channel join / leave
 
-The project contains **100 slash commands** (Discord's top-level limit). All 100 also have `!` prefix aliases, plus the extra `!uptime_seconds` prefix-only command.
+### ⭐ Favorites & Playlists
+Save your favorite music and create personal playlists:
 
-Examples:
+- Add/remove favorites
+- View favorite tracks
+- Play favorites
+- Create playlists
+- Delete playlists
+- Add tracks to playlists
+- List playlists
+- Play playlists
+- View playlist information
+
+### 📜 History
+Keep track of recently played music:
+
+- View listening history
+- Replay previous tracks
+- View recent tracks
+- Clear history
+
+### 🎛️ Audio Effects
+Customize the sound with built-in effects such as:
+
+- Bass Boost
+- Nightcore
+- Vaporwave
+- Slow
+- Speed
+- Equalizer
+- Karaoke
+
+### 🛡️ Moderation & Security
+The bot also includes server protection and moderation features:
+
+- Clear messages
+- Warn members
+- Mute / Unmute
+- Lockdown / Unlockdown
+- Clean-up tools
+- Maintenance mode
+- Security controls
+- Anti-spam protection
+- Duplicate-message detection
+- Mention-spam detection
+- Discord invite/link protection
+- Timeout-based protection
+- Security logging
+
+### ⚙️ Server & Bot Utilities
+
+- Ping
+- Uptime
+- Bot statistics
+- Help system
+- Bot information
+- Server information
+- User information
+- Avatar display
+- Server icon
+- Voice status
+- Invite information
+
+---
+
+## 📋 Commands
+
+The project currently contains **100 Slash Commands** covering music, playlists, favorites, history, audio effects, queue controls, moderation/security, and utility features.
+
+### 🎵 Music Commands
+`/play` · `/playtop` · `/pause` · `/resume` · `/skip` · `/stop` · `/volume` · `/queue` · `/nowplaying` · `/remove` · `/shuffle` · `/loop` · `/seek` · `/move` · `/join` · `/leave` · `/search`
+
+### ⭐ Favorites & Playlists
+`/favorite_add` · `/favorite_remove` · `/favorite_list` · `/favorite_play`
+
+`/playlist_create` · `/playlist_delete` · `/playlist_add` · `/playlist_list` · `/playlist_play` · `/playlist_info`
+
+### 📜 History & Lyrics
+`/history` · `/history_play` · `/history_clear` · `/recent` · `/lyrics`
+
+### 🎛️ Audio Effects
+`/bassboost` · `/nightcore` · `/vaporwave` · `/slow` · `/speed` · `/equalizer` · `/karaoke`
+
+### 🔄 Advanced Queue Controls
+`/goto` · `/rewind` · `/forward` · `/restart` · `/jump` · `/swap` · `/repeat` · `/remove_dupes` · `/queue_length` · `/queue_save` · `/queue_first` · `/queue_last` · `/queue_reverse` · `/queue_random` · `/queue_clear_after`
+
+### 🛡️ Moderation & Security
+`/security` · `/clear` · `/mute` · `/unmute` · `/warn` · `/lockdown` · `/unlockdown` · `/clean` · `/maintenance` · `/reset`
+
+### ℹ️ Information & Utilities
+`/ping` · `/uptime` · `/stats` · `/help` · `/invite` · `/about` · `/serverinfo` · `/userinfo` · `/avatar` · `/server_icon` · `/botinfo` · `/voice_status`
+
+> **Note:** The command list above is organized by function for easier navigation. The source code remains the authoritative reference for the exact implementation and available options.
+
+---
+
+## 📁 Project Structure
 
 ```text
-/play never gonna give you up
-!play never gonna give you up
-
-/pause
-!pause
-
-/queue
-!queue
-
-/skip
-!skip
+discord-main/
+├── main.py
+├── config.py
+├── requirements.txt
+├── .env.example
+├── Dockerfile
+├── fly.toml
+├── README.md
+├── PRIVACY.md
+├── TERMS.md
+├── banner.png
+├── .dockerignore
+├── .gitignore
+└── assets/
+    ├── hmb_global_asset.png
+    └── README.md
 ```
 
-## 1. Create the Discord bot
+### 🔥 `main.py`
+The main application file containing the bot logic, commands, music system, queue handling, security/moderation features, and Discord event handling.
 
-1. Open the Discord Developer Portal.
-2. Create a new application and add a Bot.
-3. Copy the bot token.
-4. Enable **Message Content Intent** and **Server Members Intent** if required by the commands you use.
-5. Invite the bot with the `bot` and `applications.commands` scopes and the needed voice/message permissions.
+### ⚙️ `config.py`
+Central configuration for important bot settings such as token-related configuration, default volume, and Rich Presence settings.
 
-## 2. Run locally
+### 📦 `requirements.txt`
+Contains the Python dependencies required to run the project.
 
-Python 3.12 is recommended. FFmpeg must be installed and available on `PATH`.
+### 🔐 `.env.example`
+Example environment configuration intended for storing sensitive values outside the source code.
+
+### 🐳 `Dockerfile`
+Allows the bot to be packaged and deployed in a Docker-based environment.
+
+### 🚀 `fly.toml`
+Deployment configuration for Fly.io.
+
+### 📜 `PRIVACY.md`
+Privacy-related information for the project.
+
+### 📄 `TERMS.md`
+Terms and usage information for the bot/project.
+
+### 🖼️ `assets/`
+Project assets and shared bot branding resources.
+
+---
+
+## 🚀 Installation
+
+### 1. Clone the project
+
+```bash
+git clone <YOUR_REPOSITORY_URL>
+cd discord-main
+```
+
+### 2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
-export DISCORD_TOKEN="YOUR_TOKEN"
+```
+
+### 3. Configure the bot
+
+Copy the example environment file:
+
+```bash
+cp .env.example .env
+```
+
+Then add your Discord bot configuration.
+
+**Never publish your real Discord bot token to GitHub.**
+
+### 4. Start the bot
+
+```bash
 python main.py
 ```
 
-On Windows PowerShell:
+When the bot starts successfully, it should connect to Discord and register its available commands.
 
-```powershell
-$env:DISCORD_TOKEN="YOUR_TOKEN"
-python main.py
-```
+---
 
-## 3. Deploy to Fly.io
+## 🔒 Security
 
-Create the app using the Fly CLI, then set the token as a secret:
+Keep all secrets outside your public repository.
 
-```bash
-fly launch --no-deploy
-fly secrets set DISCORD_TOKEN="YOUR_TOKEN"
-fly deploy
-```
+Recommended:
 
-The included `Dockerfile` installs FFmpeg. The included `fly.toml` exposes port `8080` for the health check.
+- Store the Discord token in environment variables.
+- Never upload `.env`.
+- Never paste a real token into `main.py`.
+- If a token is accidentally exposed, immediately regenerate it through the Discord Developer Portal.
 
-## Security
+---
 
-**Never commit the Discord token to GitHub.** If a token was ever exposed publicly, regenerate it immediately in the Discord Developer Portal.
+## 🧩 Technology
 
+The project is built around:
 
-### Prefix command fix
-The 100 slash commands are kept within Discord's top-level slash-command limit. `!` commands call the same slash callbacks directly, and `!uptime_seconds` remains prefix-only. This avoids duplicate registration and the `command function must be a coroutine function` / 100-command-limit startup errors.
+- 🐍 Python
+- 🤖 discord.py
+- 🎵 Discord Voice / Music components
+- 🔊 Audio processing
+- 🛡️ Moderation & security systems
+- 🐳 Docker deployment support
+- 🚀 Fly.io deployment configuration
 
+---
 
-## Rich Presence Assets
+## 💎 What HMB Can Do
 
-This build sets the bot activity to **Listening to HMB GLOBAL** and uses the Discord Rich Presence asset as the `large_image`.
+HMB is designed as an **all-in-one Discord bot** rather than a simple music player.
 
-### Rich Presence large image
-The supplied HMB GLOBAL asset key is:
+It can:
 
-`file_0000000049881f49ef3a3b0cb7cdf84`
+**🎵 Play Music**  
+Join a voice channel, play tracks, manage queues, control volume, search music, and handle playback.
 
-For Fly.io, add this as a Secret named `ASSET_KEY`. The code also accepts `RICH_PRESENCE_ASSET_KEY` for compatibility.
+**📚 Manage Your Music**  
+Create playlists, save favorites, view history, and replay tracks.
 
-```bash
-fly secrets set ASSET_KEY="file_0000000049881f49ef3a3b0cb7cdf84"
-fly deploy
-```
+**🎛️ Customize Audio**  
+Apply effects such as Bass Boost, Nightcore, Vaporwave, Slow, Speed, Equalizer, and Karaoke.
 
-If Discord gives the image a new asset key after you re-upload it, replace the value of `ASSET_KEY` with the new key.
+**🛡️ Protect Your Server**  
+Use moderation and security tools to help control spam, unwanted links/invites, excessive mentions, and problematic activity.
 
+**⚙️ Manage Your Server**  
+Use utility and moderation commands for everyday Discord server management.
 
-## 🚀 HMB GLOBAL Rich Presence (Fly.io)
+---
 
-This build is already wired to show the HMB GLOBAL Rich Presence when the bot connects.
+## 🌟 HMB Philosophy
 
-### Fly.io setup
+HMB is built with one goal:
 
-1. In **Discord Developer Portal → Rich Presence → Assets**, upload the HMB GLOBAL image.
-2. Copy the asset key shown for that image. The supplied build currently uses:
-   `file_0000000049881f49ef3a3b0cb7cdf84`
-3. In Fly.io → **Secrets**, create/update:
-   - **Name:** `ASSET_KEY`
-   - **Secret:** `file_0000000049881f49ef3a3b0cb7cdf84`
-4. Click **Set secret**.
-5. Click **Deploy Secrets** (or run `fly deploy`).
-6. Check Logs. A successful startup prints:
-   `✅ Rich Presence enabled with asset: ...`
+> **One bot. One system. Complete Discord control.**
 
-### Important
+From music and playlists to moderation, security, and server utilities, HMB brings the most important features together inside a single Discord bot.
 
-- `ASSET_KEY` is **not** the Discord bot token.
-- Never put `DISCORD_TOKEN` in source code or GitHub.
-- The Discord Developer Portal **Rich Presence Visualizer is only a preview**; the bot code sends the activity.
-- If you delete/re-upload the image, Discord may give it a different asset key. Update `ASSET_KEY` and deploy again.
+---
+
+## 👑 HMB
+
+**HMB Music Bot**  
+Professional • Powerful • Fast • Secure
+
+Made for Discord communities that want music, moderation, security, and utility features in one place.
+
+---
+
+### ⚠️ Disclaimer
+
+This README describes the project based on the provided source package. Exact behavior can depend on Discord API changes, dependency versions, external music providers, deployment environment, and the bot's configuration.
