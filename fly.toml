@@ -11,6 +11,10 @@ primary_region = "fra"
   DB_PATH = "/app/data/hmb_global.sqlite3"
 
 
+[files]
+  guest_path = "/app/cookies.txt"
+  secret_name = "YOUTUBE_COOKIE_FILE"
+
 [http_service]
   internal_port = 8080
   force_https = true

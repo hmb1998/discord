@@ -2252,36 +2252,7 @@ async def queue_clear_after(interaction: discord.Interaction):
 async def uptime_seconds(interaction: discord.Interaction):
     await interaction.response.send_message(f"⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds")
 
-def _prepare_youtube_cookie_file():
-    """Materialize the Fly.io YOUTUBE_COOKIE secret only in the container."""
-    if not YOUTUBE_COOKIE:
-        return
-    cookie_path = "/tmp/hmb_youtube_cookies.txt"
-    # Accept either a Netscape cookie file supplied as the secret or a raw
-    # cookie header (name=value; name2=value2) and convert the latter.
-    if YOUTUBE_COOKIE.startswith("# Netscape HTTP Cookie File"):
-        content = YOUTUBE_COOKIE
-    else:
-        lines = ["# Netscape HTTP Cookie File"]
-        for item in YOUTUBE_COOKIE.split(";"):
-            item = item.strip()
-            if not item or "=" not in item:
-                continue
-            name, value = item.split("=", 1)
-            lines.append(
-                f".youtube.com\tTRUE\t/\tTRUE\t0\t{name.strip()}\t{value.strip()}"
-            )
-        content = "\n".join(lines) + "\n"
-    with open(cookie_path, "w", encoding="utf-8") as fh:
-        fh.write(content)
-    try:
-        os.chmod(cookie_path, 0o600)
-    except OSError:
-        pass
-
-
 if __name__ == '__main__':
-    _prepare_youtube_cookie_file()
     # Fly.io health endpoint. Waitress serves Flask in a background thread
     # while the Discord gateway owns the main thread.
     import threading
