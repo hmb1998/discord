@@ -11,6 +11,8 @@ import json
 import time
 import datetime
 import logging
+import shlex
+import shutil
 from collections import defaultdict, deque
 from typing import Optional
 from flask import Flask, jsonify
@@ -19,12 +21,70 @@ from storage import SQLiteStorage
 
 app = Flask(__name__)
 
+def _resolve_youtube_cookiefile():
+    """Resolve YOUTUBE_COOKIE_FILE to a real Netscape cookie file.
+
+    It supports both an existing file path and cookie contents stored
+    directly in a Fly.io secret.
+    """
+    value = (YOUTUBE_COOKIE_FILE or "").strip()
+    if not value:
+        return None
+
+    if os.path.isfile(value):
+        return value
+
+    looks_like_cookie_text = (
+        "# Netscape HTTP Cookie File" in value
+        or any(
+            line.count("\\t") >= 6
+            for line in value.splitlines()
+            if line.strip()
+        )
+    )
+    if not looks_like_cookie_text:
+        return None
+
+    runtime_path = "/tmp/youtube_cookies.txt"
+    try:
+        with open(runtime_path, "w", encoding="utf-8") as cookie_file:
+            cookie_file.write(value)
+            if not value.endswith("\\n"):
+                cookie_file.write("\\n")
+        os.chmod(runtime_path, 0o600)
+        return runtime_path
+    except OSError as exc:
+        print(f"⚠️ Could not prepare YouTube cookie file: {exc}")
+        return None
+
+
+def _find_deno():
+    """Find Deno in Fly.io/container environments."""
+    candidates = [
+        os.getenv("DENO_PATH"),
+        "/root/.deno/bin/deno",
+        shutil.which("deno"),
+    ]
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def build_ydl_options(**overrides):
-    """Build yt-dlp options using the Fly.io-mounted YouTube cookie file."""
+    """Build robust yt-dlp options for YouTube + Fly.io."""
     options = dict(YDL_OPTIONS)
-    cookie_path = YOUTUBE_COOKIE_FILE
-    if cookie_path and os.path.isfile(cookie_path):
+
+    cookie_path = _resolve_youtube_cookiefile()
+    if cookie_path:
         options["cookiefile"] = cookie_path
+
+    deno_path = _find_deno()
+    if deno_path:
+        options["js_runtimes"] = {"deno": deno_path}
+    else:
+        print("⚠️ Deno was not found; YouTube JS challenges may fail.")
+
     options.update(overrides)
     return options
 
@@ -489,9 +549,33 @@ async def on_message(message):
     # invoked through PrefixInteraction, preventing Context/Interaction mixups.
 
 FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin',
+    'before_options': (
+        '-reconnect 1 -reconnect_streamed 1 '
+        '-reconnect_delay_max 5 -nostdin'
+    ),
     'options': '-vn -b:a 128k'
 }
+
+
+def build_ffmpeg_options(info=None, **overrides):
+    """Pass yt-dlp media headers to FFmpeg to reduce YouTube 403 errors."""
+    options = dict(FFMPEG_OPTIONS)
+    info = info or {}
+    headers = info.get('http_headers') or {}
+
+    if headers:
+        header_lines = [
+            f'{key}: {value}'
+            for key, value in headers.items()
+            if value is not None
+        ]
+        if header_lines:
+            header_blob = '\\r\\n'.join(header_lines) + '\\r\\n'
+            options['before_options'] += f' -headers {shlex.quote(header_blob)}'
+
+    options.update(overrides)
+    return options
+
 
 YDL_OPTIONS = {
     'format': 'bestaudio[ext=m4a]/bestaudio/best',
@@ -500,7 +584,32 @@ YDL_OPTIONS = {
     'extract_flat': False,
     'default_search': 'ytsearch',
     'skip_download': True,
-    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+
+    'user_agent': (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Chrome/120.0.0.0 Safari/537.36'
+    ),
+    'http_headers': {
+        'User-Agent': (
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+            'AppleWebKit/537.36 (KHTML, like Gecko) '
+            'Chrome/120.0.0.0 Safari/537.36'
+        ),
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.youtube.com/',
+    },
+
+    # Current YouTube JS challenge handling.
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['default', 'web_embedded'],
+        }
+    },
+
+    'socket_timeout': 20,
+    'retries': 3,
+    'fragment_retries': 3,
 }
 
 def search_youtube(query):
@@ -625,7 +734,10 @@ async def play_next(guild_id):
             info = ydl.extract_info(song['url'], download=False)
             audio_url = info['url']
 
-        source = discord.FFmpegPCMAudio(audio_url, **FFMPEG_OPTIONS)
+        source = discord.FFmpegPCMAudio(
+            audio_url,
+            **build_ffmpeg_options(info),
+        )
         vc.play(source, after=after_playing)
         vc.source = discord.PCMVolumeTransformer(vc.source)
         vc.source.volume = DEFAULT_VOLUME
@@ -1165,7 +1277,7 @@ async def seek(interaction: discord.Interaction, seconds: int):
             info = ydl.extract_info(song['url'], download=False)
             audio_url = info['url']
         
-        seek_opts = FFMPEG_OPTIONS.copy()
+        seek_opts = build_ffmpeg_options(info)
         seek_opts['before_options'] += f' -ss {seconds}'
         source = discord.FFmpegPCMAudio(audio_url, **seek_opts)
         vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop))
