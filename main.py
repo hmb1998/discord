@@ -14,18 +14,17 @@ import logging
 from collections import defaultdict, deque
 from typing import Optional
 from flask import Flask, jsonify
-from config import TOKEN, DEFAULT_VOLUME, RICH_PRESENCE_ASSET_KEY, DB_PATH
+from config import TOKEN, DEFAULT_VOLUME, RICH_PRESENCE_ASSET_KEY, DB_PATH, YOUTUBE_COOKIE_FILE
 from storage import SQLiteStorage
 
 app = Flask(__name__)
 
-YOUTUBE_COOKIE = os.getenv("YOUTUBE_COOKIE", "").strip()
-
 def build_ydl_options(**overrides):
-    """Build yt-dlp options with optional Fly.io YouTube cookie support."""
+    """Build yt-dlp options using the Fly.io-mounted YouTube cookie file."""
     options = dict(YDL_OPTIONS)
-    if YOUTUBE_COOKIE:
-        options["cookiefile"] = "/tmp/hmb_youtube_cookies.txt"
+    cookie_path = YOUTUBE_COOKIE_FILE
+    if cookie_path and os.path.isfile(cookie_path):
+        options["cookiefile"] = cookie_path
     options.update(overrides)
     return options
 

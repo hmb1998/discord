@@ -29,3 +29,8 @@ primary_region = "fra"
   memory = "1024mb"
   cpu_kind = "shared"
   cpus = 1
+
+
+[[files]]
+  guest_path = "/app/cookies.txt"
+  secret_name = "YOUTUBE_COOKIE_FILE"

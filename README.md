@@ -247,6 +247,29 @@ When the bot starts successfully, it should connect to Discord and register its 
 
 ---
 
+
+## 🍪 YouTube Cookie Setup — Fly.io
+
+HMB GLOBAL reads YouTube cookies from a file at:
+
+```text
+/app/cookies.txt
+```
+
+This is intentional: very large cookie values should not be passed as a normal environment variable because the process environment has a finite size limit.
+
+In Fly.io, create a secret named:
+
+```text
+YOUTUBE_COOKIE_FILE
+```
+
+The secret value must be the **Base64-encoded contents** of your `cookies.txt` file. Fly.io mounts that secret as `/app/cookies.txt` using the `[[files]]` entry in `fly.toml`.
+
+**Never commit `cookies.txt` or a real cookie to GitHub.**
+
+If an `ALL` cookie export is too large for Fly.io's secret/config limits, export a smaller cookie set for the YouTube site instead.
+
 ## 🔒 Security
 
 Keep all secrets outside your public repository.
