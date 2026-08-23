@@ -1,5 +1,5 @@
 app = "hmb-global-bot"
-primary_region = "ams"
+primary_region = "fra"
 
 [build]
 
@@ -26,7 +26,7 @@ primary_region = "ams"
   min_machines_running = 1
 
   [[http_service.checks]]
-    grace_period = "15s"
+    grace_period = "30s"
     interval = "30s"
     method = "GET"
     timeout = "5s"
