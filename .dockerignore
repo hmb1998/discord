@@ -1,10 +1,40 @@
+# Git
 .git
 .github
-__pycache__
+
+# Python
+__pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Environment / Secrets
 .env
-*.zip
+.env.*
+!.env.example
+
+# Database
 *.sqlite3
 *.db
+data/
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+*.rar
+
+# Tests
+tests/
+
+# Documentation
 README.md
-tests
+
+# YouTube cookies / authentication
+cookies.txt
+*.cookies.txt
+*youtube*cookies*
+youtube_cookies*
