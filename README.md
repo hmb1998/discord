@@ -324,5 +324,31 @@ This README describes the project based on the provided source package. Exact be
 
 The project includes automated checks for Python syntax, the expected **100 Slash Commands**, branding consistency, and SQLite persistence round-trips. GitHub Actions runs these checks on pushes and pull requests.
 
+## 🚀 Production Deployment
 
-> **Storage note:** This version is configured to deploy without a pre-created Fly.io volume. SQLite works at `/app/data/hmb_global.sqlite3`, but local data is not guaranteed to survive machine replacement or redeploy. Create and mount a Fly volume later if persistent storage is required.
+This release is configured for production deployment on Fly.io.
+
+### Persistent SQLite
+The database path is:
+
+```text
+/app/data/hmb_global.sqlite3
+```
+
+The production `fly.toml` mounts a Fly volume named `hmb_data` at `/app/data`.
+**The volume must exist in the `fra` region before deployment.** If Fly.io reports that the process group needs a volume, create `hmb_data` in `fra` and redeploy.
+
+### Health check
+Fly.io checks:
+
+```text
+GET /healthz
+```
+
+A healthy response is returned when the HTTP service is running.
+
+### Production HTTP server
+Flask is served through **Waitress** instead of Flask's development server.
+
+### Secrets
+Set `DISCORD_TOKEN` as a Fly.io secret. Never commit the real token.

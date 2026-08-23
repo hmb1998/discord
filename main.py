@@ -13,15 +13,24 @@ import datetime
 import logging
 from collections import defaultdict, deque
 from typing import Optional
-from flask import Flask
+from flask import Flask, jsonify
 from config import TOKEN, DEFAULT_VOLUME, RICH_PRESENCE_ASSET_KEY, DB_PATH
 from storage import SQLiteStorage
 
 app = Flask(__name__)
 
-@app.route('/')
+@app.route("/")
 def home():
-    return "Discord Music Bot is online — 100 slash commands + ! prefix aliases."
+    return "HMB GLOBAL is online — 100 slash commands + ! prefix aliases."
+
+
+@app.route("/healthz")
+def healthz():
+    return jsonify(
+        status="ok",
+        bot_ready=bool(bot.is_ready()) if "bot" in globals() else False,
+        guilds=len(bot.guilds) if "bot" in globals() and bot.is_ready() else 0,
+    )
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -2234,12 +2243,17 @@ async def uptime_seconds(interaction: discord.Interaction):
     await interaction.response.send_message(f"⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds")
 
 if __name__ == '__main__':
-    # Fly.io health endpoint.  Flask runs in a background thread while the
-    # Discord gateway owns the main thread.
+    # Fly.io health endpoint. Waitress serves Flask in a background thread
+    # while the Discord gateway owns the main thread.
     import threading
-    port = int(os.getenv('PORT', '8080'))
+    from waitress import serve
+
+    port = int(os.getenv("PORT", "8080"))
     threading.Thread(
-        target=lambda: app.run(host='0.0.0.0', port=port, use_reloader=False),
+        target=serve,
+        args=(app,),
+        kwargs={"host": "0.0.0.0", "port": port, "threads": 2},
         daemon=True,
+        name="hmb-health",
     ).start()
     bot.run(TOKEN)

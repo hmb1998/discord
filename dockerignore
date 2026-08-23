@@ -4,4 +4,7 @@ __pycache__
 *.pyc
 .env
 *.zip
+*.sqlite3
+*.db
 README.md
+tests
