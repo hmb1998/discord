@@ -31,6 +31,3 @@ primary_region = "fra"
   cpus = 1
 
 
-[[files]]
-  guest_path = "/app/cookies.txt"
-  secret_name = "YOUTUBE_COOKIE_FILE"
