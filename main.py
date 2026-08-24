@@ -635,30 +635,29 @@ def get_audio_filter(guild_id):
     return ",".join(filters)
 
 def build_ffmpeg_options(info=None, guild_id=None, **overrides):
-    """Build FFmpeg options including YouTube headers and real audio effects."""
+    """Build FFmpeg options for LOCAL downloaded audio.
+
+    yt-dlp already uses YouTube headers/cookies during download.
+    FFmpeg receives the finished local media file, so HTTP headers
+    must NOT be passed to FFmpeg.
+    """
     options = dict(FFMPEG_OPTIONS)
-    info = info or {}
-    headers = info.get("http_headers") or {}
 
-    if headers:
-        header_lines = [
-            f'{key}: {value}'
-            for key, value in headers.items()
-            if value is not None
-        ]
+    # Always keep FFmpeg input handling simple for local files.
+    options["before_options"] = "-nostdin"
 
-        if header_lines:
-            header_blob = '\r\n'.join(header_lines) + '\r\n'
-            options['before_options'] += f' -headers {shlex.quote(header_blob)}'
-
-        user_agent = headers.get('User-Agent')
-        if user_agent:
-            options['before_options'] += f' -user_agent {shlex.quote(user_agent)}'
-
-    audio_filter = get_audio_filter(guild_id) if guild_id is not None else ""
+    audio_filter = (
+        get_audio_filter(guild_id)
+        if guild_id is not None
+        else ""
+    )
 
     if audio_filter:
-        options['options'] = f"-vn -b:a 128k -af {shlex.quote(audio_filter)}"
+        options["options"] = (
+            f"-vn -b:a 128k -af {shlex.quote(audio_filter)}"
+        )
+    else:
+        options["options"] = "-vn -b:a 128k"
 
     options.update(overrides)
     return options
@@ -992,15 +991,17 @@ async def play_next(guild_id, expected_generation=None):
                 if bot.playback_generation.get(guild_id) != generation:
                     return
 
-                future = asyncio.run_coroutine_threadsafe(
-                    play_next(guild_id, expected_generation=generation),
-                    bot.loop,
-                )
                 try:
-                    future.result(timeout=5)
+                    asyncio.run_coroutine_threadsafe(
+                        play_next(
+                            guild_id,
+                            expected_generation=generation,
+                        ),
+                        bot.loop,
+                    )
                 except Exception as exc:
                     print(
-                        f"Playback callback error: "
+                        f"⚠️ Could not schedule next track: "
                         f"{type(exc).__name__}: {exc}"
                     )
 
