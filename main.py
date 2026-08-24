@@ -37,7 +37,7 @@ def _resolve_youtube_cookiefile():
     looks_like_cookie_text = (
         "# Netscape HTTP Cookie File" in value
         or any(
-            line.count("\\t") >= 6
+            line.count("\t") >= 6
             for line in value.splitlines()
             if line.strip()
         )
@@ -59,31 +59,51 @@ def _resolve_youtube_cookiefile():
 
 
 def _find_deno():
-    """Find Deno in Fly.io/container environments."""
+    """Find a supported Deno runtime in Fly.io/container environments."""
     candidates = [
         os.getenv("DENO_PATH"),
         "/root/.deno/bin/deno",
         shutil.which("deno"),
     ]
+    seen = set()
     for candidate in candidates:
-        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
     return None
 
 
 def build_ydl_options(**overrides):
-    """Build robust yt-dlp options for YouTube + Fly.io."""
+    """Build robust yt-dlp options for YouTube + Fly.io.
+
+    Fly.io mounts the YOUTUBE_COOKIE_FILE secret at /app/cookies.txt.
+    Deno + yt-dlp-ejs are installed in the Docker image so current
+    YouTube JavaScript challenges can be handled.
+    """
     options = dict(YDL_OPTIONS)
 
     cookie_path = _resolve_youtube_cookiefile()
     if cookie_path:
         options["cookiefile"] = cookie_path
+        try:
+            cookie_size = os.path.getsize(cookie_path)
+            if cookie_size < 100:
+                print("⚠️ YouTube cookie file is unexpectedly small.")
+            else:
+                print(f"✅ YouTube cookie file loaded ({cookie_size} bytes).")
+        except OSError as exc:
+            print(f"⚠️ Could not inspect YouTube cookie file: {exc}")
+    else:
+        print("⚠️ No usable YouTube cookie file was found.")
 
     deno_path = _find_deno()
     if deno_path:
         options["js_runtimes"] = {"deno": deno_path}
+        print(f"✅ YouTube JS runtime: Deno ({deno_path})")
     else:
-        print("⚠️ Deno was not found; YouTube JS challenges may fail.")
+        print("❌ Deno was not found; YouTube JS challenges may fail.")
 
     options.update(overrides)
     return options
