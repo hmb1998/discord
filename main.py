@@ -102,7 +102,7 @@ def build_ydl_options(**overrides):
 
     deno_path = _find_deno()
     if deno_path:
-        options["js_runtimes"] = {"deno": {}}
+        options["js_runtimes"] = {"deno": {"path": deno_path}}
         print(f"✅ YouTube JS runtime: Deno ({deno_path})")
     else:
         print("❌ Deno was not found; YouTube JS challenges may fail.")
@@ -144,6 +144,11 @@ class MusicBot(commands.Bot):
         self.sleep_timers = {}
         self.eq_presets = {}
         self.song_skiplist = {}
+
+        # Playback generation prevents callbacks from intentionally stopped
+        # sources (skip/seek/stop) from starting an extra song.
+        self.playback_generation = defaultdict(int)
+        self.playback_locks = {}
 
         # Professional moderation / security state
         self.security_settings = {}   # guild_id -> settings
@@ -718,163 +723,217 @@ async def get_voice_client(ctx_or_interaction):
     
     return vc, respond
 
-async def play_next(guild_id):
-    """Play next song in queue"""
-    if guild_id not in bot.queues or len(bot.queues[guild_id]) == 0:
-        # Check loop mode
-        if bot.loop_mode.get(guild_id) == 'queue' and bot.history.get(guild_id) and len(bot.history[guild_id]) > 0:
-            # Re-add all history to queue
+def _get_playback_lock(guild_id):
+    lock = bot.playback_locks.get(guild_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        bot.playback_locks[guild_id] = lock
+    return lock
+
+
+def _find_downloaded_audio(info, download_dir):
+    """Return the actual final media filepath produced by yt-dlp."""
+    candidates = []
+
+    # yt-dlp exposes the final requested file here when available.
+    for item in info.get("requested_downloads") or []:
+        for key in ("filepath", "filename"):
+            path = item.get(key) if isinstance(item, dict) else None
+            if path:
+                candidates.append(path)
+
+    # Also check the normal filename helpers.
+    filename = info.get("_filename")
+    if filename:
+        candidates.append(filename)
+
+    try:
+        with yt_dlp.YoutubeDL({}) as ydl:
+            candidates.append(ydl.prepare_filename(info))
+    except Exception:
+        pass
+
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+
+    # Post-processing can change the extension. Find the newest completed
+    # file belonging to this YouTube video ID instead of trusting _filename.
+    video_id = info.get("id")
+    if video_id and os.path.isdir(download_dir):
+        matches = []
+        for name in os.listdir(download_dir):
+            if not name.startswith(video_id + "."):
+                continue
+            if name.endswith((".part", ".ytdl", ".temp")):
+                continue
+            path = os.path.join(download_dir, name)
+            if os.path.isfile(path):
+                matches.append(path)
+
+        if matches:
+            matches.sort(key=os.path.getmtime, reverse=True)
+            return matches[0]
+
+    return None
+
+
+async def play_next(guild_id, expected_generation=None):
+    """Play the next queued song safely."""
+    current_generation = bot.playback_generation.get(guild_id, 0)
+    if (
+        expected_generation is not None
+        and current_generation != expected_generation
+    ):
+        return
+
+    queue = bot.queues.get(guild_id, [])
+    if not queue:
+        if bot.loop_mode.get(guild_id) == "queue" and bot.history.get(guild_id):
             bot.queues[guild_id] = list(bot.history[guild_id])
             bot.history[guild_id] = []
         else:
-            # Wait then disconnect
             await asyncio.sleep(10)
-            if guild_id in bot.queues and len(bot.queues[guild_id]) == 0:
-                vc = bot.custom_voice_clients.get(guild_id)
-                if vc and vc.is_connected() and not vc.is_playing():
-                    await vc.disconnect()
+            vc = bot.custom_voice_clients.get(guild_id)
+            if (
+                guild_id in bot.queues
+                and not bot.queues[guild_id]
+                and vc
+                and vc.is_connected()
+                and not vc.is_playing()
+            ):
+                await vc.disconnect()
+                bot.custom_voice_clients.pop(guild_id, None)
             return
 
-    if bot.shuffle_mode.get(guild_id):
-        random.shuffle(bot.queues[guild_id])
+    async with _get_playback_lock(guild_id):
+        # Another command/callback may have changed playback while we waited.
+        current_generation = bot.playback_generation.get(guild_id, 0)
+        if (
+            expected_generation is not None
+            and current_generation != expected_generation
+        ):
+            return
 
-    song = bot.queues[guild_id].pop(0)
-    
-    if bot.loop_mode.get(guild_id) == 'song':
-        bot.queues[guild_id].append(song)
-    
-    # Add to history
-    if guild_id not in bot.history:
-        bot.history[guild_id] = []
-    bot.history[guild_id].append(song)
-    if len(bot.history[guild_id]) > 50:
-        bot.history[guild_id].pop(0)
-    
-    bot.now_playing[guild_id] = song
-    
-    vc = bot.custom_voice_clients.get(guild_id)
-    if not vc or not vc.is_connected():
-        return
+        vc = bot.custom_voice_clients.get(guild_id)
+        if not vc or not vc.is_connected():
+            return
 
-    def after_playing(error):
-        if error:
-            print(f"Playback error: {error}")
-        coro = play_next(guild_id)
-        fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
-        try:
-            fut.result()
-        except Exception as exc:
-            print(f"Playback callback error: {type(exc).__name__}: {exc}")
+        # Prevent two play_next calls from trying to play simultaneously.
+        if vc.is_playing():
+            return
 
-    audio_file = None
+        queue = bot.queues.get(guild_id, [])
+        if not queue:
+            return
 
-    try:
-        # Download YouTube audio locally first.
-        # This prevents FFmpeg from opening an expired googlevideo URL
-        # directly, which was causing HTTP 403 Forbidden.
+        if bot.shuffle_mode.get(guild_id):
+            random.shuffle(queue)
+
+        song = queue.pop(0)
+
+        # Invalidate callbacks from the previous source.
+        bot.playback_generation[guild_id] = current_generation + 1
+        generation = bot.playback_generation[guild_id]
+
         download_dir = os.path.join("/tmp", "hmb_audio", str(guild_id))
         os.makedirs(download_dir, exist_ok=True)
+        audio_file = None
 
         def download_audio():
             options = build_ydl_options().copy()
             options.update({
-                'format': 'bestaudio[ext=m4a]/bestaudio/best',
-                'outtmpl': os.path.join(download_dir, '%(id)s.%(ext)s'),
-                'noplaylist': True,
-                'continuedl': True,
-                'nopart': False,
+                "format": "bestaudio[ext=m4a]/bestaudio/best",
+                "skip_download": False,
+                "noplaylist": True,
+                "outtmpl": os.path.join(download_dir, "%(id)s.%(ext)s"),
+                "nopart": False,
+                "continuedl": True,
             })
 
             with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(song['url'], download=True)
+                info = ydl.extract_info(song["url"], download=True)
+                filepath = _find_downloaded_audio(info, download_dir)
 
-                # Find the actual downloaded file.
-                # yt-dlp may return a filename that differs from
-                # the final post-processed file extension.
-                filepath = info.get('_filename') or ydl.prepare_filename(info)
-
-                if not os.path.isfile(filepath):
-                    video_id = info.get('id')
-
-                    candidates = []
-                    if video_id:
-                        candidates = [
-                            os.path.join(download_dir, name)
-                            for name in os.listdir(download_dir)
-                            if name.startswith(f"{video_id}.")
-                            and not name.endswith(".part")
-                            and not name.endswith(".ytdl")
-                        ]
-
-                    if candidates:
-                        candidates.sort(
-                            key=lambda path: os.path.getmtime(path),
-                            reverse=True
-                        )
-                        filepath = candidates[0]
-
-                if not os.path.isfile(filepath):
+                if not filepath:
                     raise RuntimeError(
-                        f"Downloaded audio file not found: {filepath}"
+                        "Downloaded audio file not found. "
+                        f"Video ID: {info.get('id')}"
                     )
 
-                print(f"✅ Downloaded audio file: {filepath}")
-                return filepath
+                return info, filepath
 
-        audio_file = await asyncio.to_thread(download_audio)
+        try:
+            info, audio_file = await asyncio.to_thread(download_audio)
 
-        print(f"🎵 Local audio ready: {audio_file}")
-
-        # FFmpeg reads the local file instead of the YouTube URL.
-        source = discord.FFmpegPCMAudio(audio_file)
-
-        def cleanup_audio(error):
-            if error:
-                print(f"Playback error: {error}")
-
-            try:
+            # If skip/seek/stop happened while downloading, never start the
+            # stale source that was just downloaded.
+            if bot.playback_generation.get(guild_id) != generation:
                 if audio_file and os.path.exists(audio_file):
                     os.remove(audio_file)
-                    print(f"🧹 Removed temporary audio: {audio_file}")
-            except Exception as cleanup_error:
-                print(f"⚠️ Audio cleanup failed: {cleanup_error}")
+                return
 
-            coro = play_next(guild_id)
-            fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
+            print(f"🎵 Local audio ready: {audio_file}")
 
-            try:
-                fut.result()
-            except Exception as exc:
-                print(
-                    f"Playback callback error: "
-                    f"{type(exc).__name__}: {exc}"
-                )
-
-        vc.play(source, after=cleanup_audio)
-        vc.source = discord.PCMVolumeTransformer(vc.source)
-        vc.source.volume = DEFAULT_VOLUME
-
-    except Exception as e:
-        print(f"Error in playback: {type(e).__name__}: {e}")
-
-        try:
-            if audio_file and os.path.exists(audio_file):
-                os.remove(audio_file)
-        except Exception:
-            pass
-
-        coro = play_next(guild_id)
-        fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
-
-        try:
-            fut.result(timeout=30)
-        except Exception as exc:
-            print(
-                f"Playback recovery error: "
-                f"{type(exc).__name__}: {exc}"
+            source = discord.FFmpegPCMAudio(
+                audio_file,
+                **build_ffmpeg_options(info),
             )
 
-# Bot readiness is handled by the Rich Presence on_ready handler above.
+            # Only mark the song as current after the local source is ready.
+            bot.now_playing[guild_id] = song
+            bot.history.setdefault(guild_id, []).append(song)
+            if len(bot.history[guild_id]) > 50:
+                bot.history[guild_id].pop(0)
+
+            if bot.loop_mode.get(guild_id) == "song":
+                bot.queues.setdefault(guild_id, []).append(song)
+
+            def cleanup_audio(error):
+                if error:
+                    print(f"Playback error: {error}")
+
+                try:
+                    if audio_file and os.path.exists(audio_file):
+                        os.remove(audio_file)
+                        print(f"🧹 Removed temporary audio: {audio_file}")
+                except Exception as cleanup_error:
+                    print(f"⚠️ Audio cleanup failed: {cleanup_error}")
+
+                # Ignore callbacks from an intentionally stopped old source.
+                if bot.playback_generation.get(guild_id) != generation:
+                    return
+
+                future = asyncio.run_coroutine_threadsafe(
+                    play_next(guild_id, expected_generation=generation),
+                    bot.loop,
+                )
+                try:
+                    future.result(timeout=5)
+                except Exception as exc:
+                    print(
+                        f"Playback callback error: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
+            vc.play(source, after=cleanup_audio)
+            vc.source = discord.PCMVolumeTransformer(vc.source)
+            vc.source.volume = DEFAULT_VOLUME
+
+        except Exception as exc:
+            print(f"❌ Error in playback: {type(exc).__name__}: {exc}")
+
+            if audio_file and os.path.exists(audio_file):
+                try:
+                    os.remove(audio_file)
+                except OSError:
+                    pass
+
+            # Put the failed song back so a transient YouTube error does not
+            # silently destroy the user's queue.
+            if bot.playback_generation.get(guild_id) == generation:
+                bot.queues.setdefault(guild_id, []).insert(0, song)
+                bot.now_playing.pop(guild_id, None)
 
 # ============================================================
 # CHECK FUNCTION (for voice channel check)
@@ -1125,7 +1184,7 @@ async def play(interaction: discord.Interaction, query: str):
         return
     
     guild_id = interaction.guild_id
-    song = search_youtube(query)
+    song = await asyncio.to_thread(search_youtube, query)
     
     if 'error' in song:
         await interaction.followup.send(f"❌ {song['error']}", ephemeral=True)
@@ -1156,7 +1215,7 @@ async def playtop(interaction: discord.Interaction, query: str):
         return
     
     guild_id = interaction.guild_id
-    song = search_youtube(query)
+    song = await asyncio.to_thread(search_youtube, query)
     
     if 'error' in song:
         await interaction.followup.send(f"❌ {song['error']}", ephemeral=True)
@@ -1197,6 +1256,7 @@ async def resume(interaction: discord.Interaction):
 
 # ===== 5. SKIP =====
 @bot.tree.command(name='skip', description='Skip the current song')
+@app_commands.describe(count='Number of songs to skip (default: 1)')
 async def skip(interaction: discord.Interaction, count: Optional[int] = 1):
     try:
         await interaction.response.defer()
@@ -1209,28 +1269,33 @@ async def skip(interaction: discord.Interaction, count: Optional[int] = 1):
             return
 
         count = max(1, count or 1)
-        queue = bot.queues.get(guild_id, [])
+        queue = bot.queues.setdefault(guild_id, [])
 
+        # The current song counts as one skipped item. Remove the additional
+        # queued items now, then start exactly one replacement song.
         skipped = min(count, len(queue) + 1)
+        for _ in range(max(0, skipped - 1)):
+            if queue:
+                queue.pop(0)
 
+        bot.playback_generation[guild_id] += 1
         vc.stop()
-
-        await asyncio.sleep(0.15)
 
         await interaction.followup.send(
             f"⏭️ **Skipped {skipped} song{'s' if skipped > 1 else ''}.**"
         )
 
-    except Exception as e:
-        print(f"❌ SKIP ERROR: {type(e).__name__}: {e}")
+        asyncio.create_task(play_next(guild_id))
+
+    except Exception as exc:
+        print(f"❌ SKIP ERROR: {type(exc).__name__}: {exc}")
         try:
             await interaction.followup.send(
                 "❌ Skip failed. Check bot logs.",
-                ephemeral=True
+                ephemeral=True,
             )
         except Exception:
             pass
-
 
 # ===== 6. STOP =====
 @bot.tree.command(name='stop', description='⏹ Stop playback and clear queue')
@@ -1238,11 +1303,19 @@ async def stop(interaction: discord.Interaction):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
     if vc and vc.is_connected():
-        if vc.is_playing():
-            vc.stop()
+        # Invalidate the current source callback before stopping it.
+        bot.playback_generation[guild_id] += 1
         bot.queues[guild_id] = []
-        await vc.disconnect()
-        bot.custom_voice_clients.pop(guild_id, None)
+        bot.now_playing.pop(guild_id, None)
+
+        if vc.is_playing() or vc.is_paused():
+            vc.stop()
+
+        try:
+            await vc.disconnect()
+        finally:
+            bot.custom_voice_clients.pop(guild_id, None)
+
         await interaction.response.send_message("⏹ **Stopped & Disconnected** 👋")
     else:
         await interaction.response.send_message("❌ Not connected", ephemeral=True)
@@ -1405,178 +1478,154 @@ async def seek(interaction: discord.Interaction, seconds: int):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
 
-    if not vc or not vc.is_playing():
+    if not vc or not vc.is_connected() or not vc.is_playing():
         await interaction.response.send_message(
             "❌ Nothing is playing",
-            ephemeral=True
+            ephemeral=True,
         )
         return
 
     if guild_id not in bot.now_playing:
         await interaction.response.send_message(
             "❌ No current song info",
-            ephemeral=True
+            ephemeral=True,
         )
         return
 
     song = bot.now_playing[guild_id]
-    duration = song.get('duration', 0)
+    duration = song.get("duration", 0)
 
     if seconds < 0:
         await interaction.response.send_message(
             "❌ Position cannot be negative",
-            ephemeral=True
+            ephemeral=True,
         )
         return
 
     if duration and seconds > duration:
         await interaction.response.send_message(
             f"❌ Cannot seek past song duration ({format_time(duration)})",
-            ephemeral=True
+            ephemeral=True,
         )
         return
 
-    # IMPORTANT:
-    # Downloading the YouTube audio can take longer than
-    # Discord's interaction response window.
+    # Downloading can take longer than Discord's interaction window.
     await interaction.response.defer()
 
-    try:
-        download_dir = os.path.join(
-            "/tmp",
-            "hmb_audio",
-            str(guild_id)
-        )
-        os.makedirs(download_dir, exist_ok=True)
+    download_dir = os.path.join("/tmp", "hmb_audio", str(guild_id))
+    os.makedirs(download_dir, exist_ok=True)
 
+    # Capture the source generation. If skip/stop/another seek happens while
+    # downloading, this seek becomes stale and will not replace the new source.
+    base_generation = bot.playback_generation.get(guild_id, 0)
+    audio_file = None
+
+    def download_seek_audio():
         options = build_ydl_options()
         options.update({
-            'format': 'bestaudio[ext=m4a]/bestaudio/best',
-            'skip_download': False,
-            'noplaylist': True,
-            'outtmpl': os.path.join(
-                download_dir,
-                '%(id)s.%(ext)s'
-            ),
-            'nopart': False,
-            'continuedl': True,
+            "format": "bestaudio[ext=m4a]/bestaudio/best",
+            "skip_download": False,
+            "noplaylist": True,
+            "outtmpl": os.path.join(download_dir, "%(id)s.%(ext)s"),
+            "nopart": False,
+            "continuedl": True,
         })
 
-        def download_seek_audio():
-            with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(
-                    song['url'],
-                    download=True
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(song["url"], download=True)
+            filepath = _find_downloaded_audio(info, download_dir)
+
+            if not filepath:
+                raise RuntimeError(
+                    "Downloaded audio file not found. "
+                    f"Video ID: {info.get('id')}"
                 )
 
-                audio_file = (
-                    info.get('_filename')
-                    or ydl.prepare_filename(info)
-                )
+            return info, filepath
 
-                if not audio_file or not os.path.isfile(audio_file):
-                    video_id = info.get('id')
+    try:
+        info, audio_file = await asyncio.to_thread(download_seek_audio)
 
-                    candidates = []
-
-                    if video_id:
-                        candidates = [
-                            os.path.join(
-                                download_dir,
-                                name
-                            )
-                            for name in os.listdir(download_dir)
-                            if name.startswith(video_id + ".")
-                            and not name.endswith(".part")
-                            and not name.endswith(".ytdl")
-                        ]
-
-                    if candidates:
-                        candidates.sort(
-                            key=lambda path: os.path.getmtime(path),
-                            reverse=True
-                        )
-                        audio_file = candidates[0]
-
-                if not audio_file or not os.path.isfile(audio_file):
-                    raise RuntimeError(
-                        f"Downloaded audio file not found: {audio_file}"
-                    )
-
-                return info, audio_file
-
-        info, audio_file = await asyncio.to_thread(
-            download_seek_audio
-        )
-
-        print(f"🎵 Seek audio ready: {audio_file}")
-
-        # Stop the current source only after the download succeeded.
-        if vc.is_playing():
-            vc.stop()
-
-        seek_opts = build_ffmpeg_options(info)
-        seek_opts['before_options'] += f' -ss {seconds}'
-
-        source = discord.FFmpegPCMAudio(
-            audio_file,
-            **seek_opts
-        )
-
-        def after_seek(error):
-            if error:
-                print(f"Seek playback error: {error}")
-
-            try:
+        async with _get_playback_lock(guild_id):
+            if bot.playback_generation.get(guild_id) != base_generation:
                 if audio_file and os.path.exists(audio_file):
                     os.remove(audio_file)
-                    print(
-                        f"🧹 Removed temporary seek audio: {audio_file}"
-                    )
-            except Exception as cleanup_error:
-                print(
-                    f"⚠️ Seek audio cleanup failed: {cleanup_error}"
+                await interaction.followup.send(
+                    "⚠️ Seek cancelled because playback changed.",
+                    ephemeral=True,
                 )
+                return
 
-            coro = play_next(guild_id)
-            asyncio.run_coroutine_threadsafe(
-                coro,
-                bot.loop
+            # Invalidate the old source callback before stopping it.
+            bot.playback_generation[guild_id] += 1
+            generation = bot.playback_generation[guild_id]
+
+            if vc.is_playing() or vc.is_paused():
+                vc.stop()
+
+            seek_opts = build_ffmpeg_options(info)
+            seek_opts["before_options"] += f" -ss {seconds}"
+
+            source = discord.FFmpegPCMAudio(
+                audio_file,
+                **seek_opts,
             )
 
-        vc.play(
-            source,
-            after=after_seek
-        )
+            def after_seek(error):
+                if error:
+                    print(f"Seek playback error: {error}")
 
-        vc.source = discord.PCMVolumeTransformer(
-            vc.source
-        )
-        vc.source.volume = DEFAULT_VOLUME
+                try:
+                    if audio_file and os.path.exists(audio_file):
+                        os.remove(audio_file)
+                        print(f"🧹 Removed temporary seek audio: {audio_file}")
+                except Exception as cleanup_error:
+                    print(f"⚠️ Seek audio cleanup failed: {cleanup_error}")
 
+                # The seeked source is now the valid source.
+                if bot.playback_generation.get(guild_id) != generation:
+                    return
+
+                future = asyncio.run_coroutine_threadsafe(
+                    play_next(guild_id, expected_generation=generation),
+                    bot.loop,
+                )
+                try:
+                    future.result(timeout=5)
+                except Exception as exc:
+                    print(
+                        f"Seek callback error: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
+            vc.play(source, after=after_seek)
+            vc.source = discord.PCMVolumeTransformer(vc.source)
+            vc.source.volume = DEFAULT_VOLUME
+
+        # The same Discord interaction is already deferred, so use followup.
         await interaction.followup.send(
             f"⏩ **Seeked to** {format_time(seconds)}"
         )
 
-    except Exception as e:
-        print(
-            f"❌ Seek error: "
-            f"{type(e).__name__}: {e}"
-        )
+    except Exception as exc:
+        print(f"❌ Seek error: {type(exc).__name__}: {exc}")
+
+        if audio_file and os.path.exists(audio_file):
+            try:
+                os.remove(audio_file)
+            except OSError:
+                pass
 
         try:
             await interaction.followup.send(
-                f"❌ Seek error: {str(e)[:150]}",
-                ephemeral=True
+                f"❌ Seek error: {str(exc)[:150]}",
+                ephemeral=True,
             )
         except Exception as followup_error:
             print(
                 f"⚠️ Could not send seek error: "
-                f"{type(followup_error).__name__}: "
-                f"{followup_error}"
+                f"{type(followup_error).__name__}: {followup_error}"
             )
-
-# ===== 17. MOVESONG =====
 
 # ===== 17. MOVESONG =====
 @bot.tree.command(name='move', description='↕️ Move a song to a different position in queue')
