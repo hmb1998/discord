@@ -766,26 +766,92 @@ async def play_next(guild_id):
         except Exception as exc:
             print(f"Playback callback error: {type(exc).__name__}: {exc}")
 
-    try:
-        with yt_dlp.YoutubeDL(build_ydl_options()) as ydl:
-            info = ydl.extract_info(song['url'], download=False)
-            audio_url = info['url']
+    audio_file = None
 
-        source = discord.FFmpegPCMAudio(
-            audio_url,
-            **build_ffmpeg_options(info),
-        )
-        vc.play(source, after=after_playing)
+    try:
+        # Download YouTube audio locally first.
+        # This prevents FFmpeg from opening an expired googlevideo URL
+        # directly, which was causing HTTP 403 Forbidden.
+        download_dir = os.path.join("/tmp", "hmb_audio", str(guild_id))
+        os.makedirs(download_dir, exist_ok=True)
+
+        def download_audio():
+            options = build_ydl_options().copy()
+            options.update({
+                'format': 'bestaudio[ext=m4a]/bestaudio/best',
+                'outtmpl': os.path.join(download_dir, '%(id)s.%(ext)s'),
+                'noplaylist': True,
+                'continuedl': True,
+                'nopart': False,
+            })
+
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(song['url'], download=True)
+
+                filepath = info.get('_filename')
+
+                if not filepath:
+                    filepath = ydl.prepare_filename(info)
+
+                if not os.path.isfile(filepath):
+                    raise RuntimeError(
+                        f"Downloaded audio file not found: {filepath}"
+                    )
+
+                return filepath
+
+        audio_file = await asyncio.to_thread(download_audio)
+
+        print(f"🎵 Local audio ready: {audio_file}")
+
+        # FFmpeg reads the local file instead of the YouTube URL.
+        source = discord.FFmpegPCMAudio(audio_file)
+
+        def cleanup_audio(error):
+            if error:
+                print(f"Playback error: {error}")
+
+            try:
+                if audio_file and os.path.exists(audio_file):
+                    os.remove(audio_file)
+                    print(f"🧹 Removed temporary audio: {audio_file}")
+            except Exception as cleanup_error:
+                print(f"⚠️ Audio cleanup failed: {cleanup_error}")
+
+            coro = play_next(guild_id)
+            fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
+
+            try:
+                fut.result()
+            except Exception as exc:
+                print(
+                    f"Playback callback error: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+        vc.play(source, after=cleanup_audio)
         vc.source = discord.PCMVolumeTransformer(vc.source)
         vc.source.volume = DEFAULT_VOLUME
+
     except Exception as e:
-        print(f"Error in playback: {e}")
+        print(f"Error in playback: {type(e).__name__}: {e}")
+
+        try:
+            if audio_file and os.path.exists(audio_file):
+                os.remove(audio_file)
+        except Exception:
+            pass
+
         coro = play_next(guild_id)
         fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
+
         try:
             fut.result(timeout=30)
         except Exception as exc:
-            print(f"Playback recovery error: {type(exc).__name__}: {exc}")
+            print(
+                f"Playback recovery error: "
+                f"{type(exc).__name__}: {exc}"
+            )
 
 # Bot readiness is handled by the Rich Presence on_ready handler above.
 
@@ -1333,13 +1399,35 @@ async def seek(interaction: discord.Interaction, seconds: int):
     # Restart playback at position - we need to recreate the source
     vc.stop()
     try:
-        with yt_dlp.YoutubeDL(build_ydl_options()) as ydl:
-            info = ydl.extract_info(song['url'], download=False)
-            audio_url = info['url']
-        
+        audio_file = None
+
+        download_dir = os.path.join("/tmp", "hmb_audio", str(guild_id))
+        os.makedirs(download_dir, exist_ok=True)
+
+        options = build_ydl_options()
+        options.update({
+            'format': 'bestaudio/best',
+            'skip_download': False,
+            'noplaylist': True,
+            'outtmpl': os.path.join(download_dir, '%(id)s.%(ext)s'),
+            'nopart': False,
+            'continuedl': True,
+        })
+
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(song['url'], download=True)
+            audio_file = info.get('_filename') or ydl.prepare_filename(info)
+
+        if not audio_file or not os.path.isfile(audio_file):
+            raise RuntimeError(f"Downloaded audio file not found: {audio_file}")
+
         seek_opts = build_ffmpeg_options(info)
         seek_opts['before_options'] += f' -ss {seconds}'
-        source = discord.FFmpegPCMAudio(audio_url, **seek_opts)
+
+        source = discord.FFmpegPCMAudio(
+            audio_file,
+            **seek_opts
+        )
         vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop))
         vc.source = discord.PCMVolumeTransformer(vc.source)
         vc.source.volume = DEFAULT_VOLUME
