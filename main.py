@@ -1084,9 +1084,11 @@ _prefetch_watch_tasks = {}
 
 async def _prefetch_watch(guild_id):
     """
-    Continuously watch the queue and prefetch the next song.
-    This catches songs added AFTER the current song already started.
+    Watch the queue and prefetch only when the next queued song changes.
+    Prevents repeated Cache HIT checks every second.
     """
+    last_video_id = None
+
     try:
         while True:
             vc = bot.custom_voice_clients.get(guild_id)
@@ -1097,7 +1099,15 @@ async def _prefetch_watch(guild_id):
             queue = bot.queues.get(guild_id, [])
 
             if queue:
-                await _prefetch_next(guild_id)
+                next_song = queue[0]
+                video_id = next_song.get("id")
+
+                if video_id and video_id != last_video_id:
+                    last_video_id = video_id
+                    await _prefetch_next(guild_id)
+
+            else:
+                last_video_id = None
 
             await asyncio.sleep(1)
 
