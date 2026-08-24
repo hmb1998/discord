@@ -1075,6 +1075,65 @@ def _start_prefetch(guild_id):
     task.add_done_callback(cleanup_prefetch)
 
 
+# ============================================================
+# SMART PREFETCH ENGINE V2
+# ============================================================
+
+_prefetch_watch_tasks = {}
+
+
+async def _prefetch_watch(guild_id):
+    """
+    Continuously watch the queue and prefetch the next song.
+    This catches songs added AFTER the current song already started.
+    """
+    try:
+        while True:
+            vc = bot.custom_voice_clients.get(guild_id)
+
+            if not vc or not vc.is_connected():
+                break
+
+            queue = bot.queues.get(guild_id, [])
+
+            if queue:
+                await _prefetch_next(guild_id)
+
+            await asyncio.sleep(1)
+
+    except asyncio.CancelledError:
+        return
+    except Exception as exc:
+        print(
+            f"⚠️ Prefetch watcher failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+    finally:
+        current = _prefetch_watch_tasks.get(guild_id)
+
+        if current is asyncio.current_task():
+            _prefetch_watch_tasks.pop(guild_id, None)
+
+
+def _start_prefetch_watcher(guild_id):
+    """Start one queue watcher per guild."""
+    task = _prefetch_watch_tasks.get(guild_id)
+
+    if task and not task.done():
+        return
+
+    task = asyncio.create_task(
+        _prefetch_watch(guild_id)
+    )
+
+    _prefetch_watch_tasks[guild_id] = task
+
+    print(
+        f"🚀 Smart Prefetch V2 watcher started "
+        f"for guild {guild_id}"
+    )
+
+
 def _find_downloaded_audio(info, download_dir):
     """Return the actual final media filepath produced by yt-dlp."""
     candidates = []
@@ -1327,6 +1386,7 @@ async def play_next(guild_id, expected_generation=None):
             # Start downloading the next queued song in the background.
             # Playback is not blocked by prefetch.
             _start_prefetch(guild_id)
+            _start_prefetch_watcher(guild_id)
 
         except Exception as exc:
             print(f"❌ Error in playback: {type(exc).__name__}: {exc}")
