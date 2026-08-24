@@ -636,7 +636,7 @@ YDL_OPTIONS = {
     # Current YouTube JS challenge handling.
     'extractor_args': {
         'youtube': {
-            'player_client': ['default'],
+            'player_client': ['default', 'web_embedded'],
         }
     },
 
