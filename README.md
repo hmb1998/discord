@@ -1,395 +1,292 @@
-## 💾 Fly.io Database
+# 🎵 HMB GLOBAL
 
-The bot stores HMB GLOBAL data locally at:
+```{=html}
+<p align="center">
+```
+`<img src="banner.png" alt="HMB GLOBAL" width="100%">`{=html}
+```{=html}
+</p>
+```
+```{=html}
+<p align="center">
+```
+`<strong>`{=html}Smart • Fast • Secure • Powerful Discord Music
+Bot`</strong>`{=html}
+```{=html}
+</p>
+```
+```{=html}
+<p align="center">
+```
+`<a href="https://github.com/hmb1998/discord">`{=html}`<img src="https://img.shields.io/github/stars/hmb1998/discord?style=for-the-badge" alt="GitHub Stars">`{=html}`</a>`{=html}
+`<a href="https://github.com/hmb1998/discord/commits/main">`{=html}`<img src="https://img.shields.io/github/last-commit/hmb1998/discord?style=for-the-badge" alt="Last Commit">`{=html}`</a>`{=html}
+`<a href="https://www.python.org/">`{=html}`<img src="https://img.shields.io/badge/Python-3.12+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">`{=html}`</a>`{=html}
+`<a href="https://discordpy.readthedocs.io/">`{=html}`<img src="https://img.shields.io/badge/discord.py-2.4+-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="discord.py">`{=html}`</a>`{=html}
+`<a href="https://fly.io/">`{=html}`<img src="https://img.shields.io/badge/Deploy-Fly.io-8B5CF6?style=for-the-badge" alt="Fly.io">`{=html}`</a>`{=html}
+```{=html}
+</p>
+```
+> **HMB GLOBAL** is an all-in-one Discord bot focused on music, voice
+> playback, playlists, favorites, history, audio controls, moderation,
+> security, persistence, and server utilities.
 
-```text
+## 🚀 Highlights
+
+-   🎧 Full Discord voice/music system
+-   ⚡ **100 Slash Commands** loaded by the current bot deployment
+-   ⌨️ `!` prefix aliases
+-   📋 Queue, history, favorites, and playlists
+-   🔁 Loop, shuffle, seek, rewind, forward, restart, move, swap and
+    queue tools
+-   🎛️ Audio effects and EQ-style presets
+-   🛡️ Moderation and anti-spam/security controls
+-   💾 SQLite persistence for bot data
+-   🍪 YouTube cookie support for yt-dlp
+-   🦕 Deno runtime support for current YouTube JavaScript challenges
+-   🧹 Automatic audio-cache cleanup
+-   🚀 Docker + Fly.io deployment support
+-   ❤️ Rich Presence and `/healthz` monitoring endpoint
+
+## 🎶 Music System
+
+HMB GLOBAL provides a complete voice playback workflow: play/search,
+pause/resume, skip, stop, volume, now playing, queue management,
+join/leave voice, shuffle, repeat/loop, seek, rewind, forward, restart,
+jump/move, swap, duplicate removal and queue utilities.
+
+The bot maintains per-guild playback state including queues, current
+track, history, favorites, playlists, loop mode, shuffle mode, sleep
+timers, EQ presets, and playback generations/locks.
+
+## ⭐ Favorites, Playlists & History
+
+-   Add/remove/list/play favorites
+-   Create/delete/list/play playlists and add tracks
+-   View, replay, recent-track and clear-history tools
+
+Persistent bot state is handled by the SQLite storage layer.
+
+## 🎛️ Audio Controls
+
+Includes volume, equalizer-style presets, Bass Boost, Nightcore,
+Vaporwave, Slow, Speed and Karaoke-style controls.
+
+## 🛡️ Moderation & Security
+
+-   Anti-spam protection
+-   Duplicate-message detection
+-   Mention-spam detection
+-   Discord invite/link controls
+-   Progressive timeout protection
+-   Member warnings
+-   Lockdown controls
+-   Message cleanup
+-   Maintenance controls
+-   Permission-aware command error handling
+
+## 💾 Persistence & Audio Cache
+
+Default database path:
+
+``` text
 /app/data/hmb_global.sqlite3
 ```
 
-`DB_PATH` is configured automatically and can be overridden with a Fly.io environment variable.
+Audio cache:
 
-## 🔐 Token Setup — Fly.io
-
-This project uses environment variables for the Discord bot token.
-
-Set the following **Fly.io Secret**:
-
-```text
-DISCORD_TOKEN=YOUR_DISCORD_BOT_TOKEN
+``` text
+/app/data/hmb_audio
 ```
 
-Do **not** put the real token in `config.py`, `.env.example`, `README.md`, or GitHub.
+The Fly.io configuration mounts `/app/data` for application data. HMB
+GLOBAL also runs an automatic audio-cache cleanup task so expired/extra
+cached files are removed according to the configured cache limits.
 
-The bot reads the token with:
+## 🧠 YouTube / yt-dlp Runtime
 
-```python
-TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("TOKEN")
+The project supports YouTube cookies, `yt-dlp[default]`, Deno for
+JavaScript challenges, and FFmpeg audio processing. The Docker image
+installs FFmpeg and Deno, while the application detects the Deno
+executable and resolves the configured cookie file.
+
+Fly.io mounts the `YOUTUBE_COOKIE_FILE` secret at `/app/cookies.txt`.
+
+**Never commit real YouTube cookies or Discord tokens to GitHub.**
+
+## 🩺 Health Check
+
+``` text
+GET /healthz
 ```
 
-# 🎵 HMB GLOBAL
+The endpoint reports bot readiness and connected guild count and is used
+by the Fly.io HTTP health check.
 
-> **HMB GLOBAL — Smart • Secure • Powerful Discord Music Bot**
+## 📋 Command Groups
 
-**🎧 Your Music. Your Way.**  
-**⚡ Fast & Reliable • 📋 Queue & Playlists • 🔊 Volume Control • 🛡️ Security • 🎛️ Audio Effects**  
-**🌐 24/7 Music Experience**
+The current deployment reports **100 Slash Commands loaded**.
 
+  -----------------------------------------------------------------------
+  Category                            Examples
+  ----------------------------------- -----------------------------------
+  🎵 Music                            `/play`, `/pause`, `/resume`,
+                                      `/skip`, `/stop`, `/volume`
 
-A powerful Discord bot built with **Python + discord.py**, designed to combine high-quality music playback, queue management, playlists, favorites, history, audio effects, moderation, security tools, and server utilities in one professional package.
+  📋 Queue                            `/queue`, `/shuffle`, `/loop`,
+                                      `/seek`, `/move`, `/remove`
 
----
+  ⭐ Favorites                        favorite management and playback
+                                      commands
 
-## ✨ Features
+  📚 Playlists                        playlist creation, editing, listing
+                                      and playback
 
-### 🎶 Music System
-HMB GLOBAL provides a complete music experience for your Discord server:
+  📜 History                          history, recent tracks and replay
+                                      tools
 
-- ▶️ Play music from supported sources
-- ⏸️ Pause / ▶️ Resume
-- ⏭️ Skip tracks
-- ⏹️ Stop playback
-- 🔊 Volume control
-- 📜 Queue management
-- 🎵 Now Playing
-- 🔎 Music search
-- 🔁 Loop / Repeat
-- 🔀 Shuffle
-- ⏩ Seek / Forward
-- ⏪ Rewind
-- 🔄 Restart current track
-- 🎚️ Queue reordering and cleanup
-- 🎧 Voice channel join / leave
+  🎛️ Audio                            EQ/effects and playback-speed
+                                      controls
 
-### ⭐ Favorites & Playlists
-Save your favorite music and create personal playlists:
+  🛡️ Security                         security, warning, lockdown and
+                                      anti-spam tools
 
-- Add/remove favorites
-- View favorite tracks
-- Play favorites
-- Create playlists
-- Delete playlists
-- Add tracks to playlists
-- List playlists
-- Play playlists
-- View playlist information
+  ℹ️ Utilities                        ping, uptime, statistics,
+                                      server/user and bot tools
+  -----------------------------------------------------------------------
 
-### 📜 History
-Keep track of recently played music:
-
-- View listening history
-- Replay previous tracks
-- View recent tracks
-- Clear history
-
-### 🎛️ Audio Effects
-Customize the sound with built-in effects such as:
-
-- Bass Boost
-- Nightcore
-- Vaporwave
-- Slow
-- Speed
-- Equalizer
-- Karaoke
-
-### 🛡️ Moderation & Security
-The bot also includes server protection and moderation features:
-
-- Clear messages
-- Warn members
-- Mute / Unmute
-- Lockdown / Unlockdown
-- Clean-up tools
-- Maintenance mode
-- Security controls
-- Anti-spam protection
-- Duplicate-message detection
-- Mention-spam detection
-- Discord invite/link protection
-- Timeout-based protection
-- Security logging
-
-### ⚙️ Server & Bot Utilities
-
-- Ping
-- Uptime
-- Bot statistics
-- Help system
-- Bot information
-- Server information
-- User information
-- Avatar display
-- Server icon
-- Voice status
-- Invite information
-
----
-
-## 📋 Commands
-
-The project currently contains **100 Slash Commands** covering music, playlists, favorites, history, audio effects, queue controls, moderation/security, and utility features.
-
-### 🎵 Music Commands
-`/play` · `/playtop` · `/pause` · `/resume` · `/skip` · `/stop` · `/volume` · `/queue` · `/nowplaying` · `/remove` · `/shuffle` · `/loop` · `/seek` · `/move` · `/join` · `/leave` · `/search`
-
-### ⭐ Favorites & Playlists
-`/favorite_add` · `/favorite_remove` · `/favorite_list` · `/favorite_play`
-
-`/playlist_create` · `/playlist_delete` · `/playlist_add` · `/playlist_list` · `/playlist_play` · `/playlist_info`
-
-### 📜 History & Lyrics
-`/history` · `/history_play` · `/history_clear` · `/recent` · `/lyrics`
-
-### 🎛️ Audio Effects
-`/bassboost` · `/nightcore` · `/vaporwave` · `/slow` · `/speed` · `/equalizer` · `/karaoke`
-
-### 🔄 Advanced Queue Controls
-`/goto` · `/rewind` · `/forward` · `/restart` · `/jump` · `/swap` · `/repeat` · `/remove_dupes` · `/queue_length` · `/queue_save` · `/queue_first` · `/queue_last` · `/queue_reverse` · `/queue_random` · `/queue_clear_after`
-
-### 🛡️ Moderation & Security
-`/security` · `/clear` · `/mute` · `/unmute` · `/warn` · `/lockdown` · `/unlockdown` · `/clean` · `/maintenance` · `/reset`
-
-### ℹ️ Information & Utilities
-`/ping` · `/uptime` · `/stats` · `/help` · `/invite` · `/about` · `/serverinfo` · `/userinfo` · `/avatar` · `/server_icon` · `/botinfo` · `/voice_status`
-
-> **Note:** The command list above is organized by function for easier navigation. The source code remains the authoritative reference for the exact implementation and available options.
-
----
+The source code is the authority for exact command names, options,
+permissions and behavior.
 
 ## 📁 Project Structure
 
-```text
-discord-main/
-├── main.py
-├── storage.py
-├── config.py
-├── requirements.txt
-├── .env.example
-├── Dockerfile
-├── fly.toml
-├── README.md
-├── PRIVACY.md
-├── TERMS.md
-├── banner.png
-├── .dockerignore
-├── .gitignore
-└── assets/
-    ├── hmb_global_asset.png
-    └── README.md
+``` text
+hmb-global-bot/
+├── main.py              # Discord bot, music system, commands and events
+├── storage.py           # SQLite persistence layer
+├── config.py            # Runtime configuration
+├── requirements.txt     # Python dependencies
+├── .env.example         # Safe configuration template
+├── Dockerfile           # Container image definition
+├── fly.toml             # Fly.io deployment configuration
+├── README.md            # Project documentation
+├── PRIVACY.md           # Privacy information
+├── TERMS.md              # Terms / usage information
+├── FIXES.md              # Fixes and maintenance notes
+├── banner.png           # HMB GLOBAL branding
+├── assets/              # Project assets
+└── data/                # Runtime/local data directory
 ```
 
-### 🔥 `main.py`
-The main application file containing the bot logic, commands, music system, queue handling, security/moderation features, and Discord event handling.
+## 🧰 Tech Stack
 
-### ⚙️ `config.py`
-Central configuration for important bot settings such as token-related configuration, default volume, and Rich Presence settings.
+  Technology        Purpose
+  ----------------- -------------------------------
+  🐍 Python 3.12+   Application runtime
+  🤖 discord.py     Discord API and bot framework
+  🎵 yt-dlp         Media extraction / downloads
+  🦕 Deno           YouTube JavaScript runtime
+  🔊 FFmpeg         Audio processing
+  🧂 PyNaCl         Discord voice support
+  🗃️ SQLite         Persistent bot state
+  🌐 Flask          Health/web endpoint
+  🐳 Docker         Container deployment
+  🚀 Fly.io         Production hosting
 
-### 💾 Persistence
-The bot includes a lightweight SQLite persistence layer for playlists, favorites, playback history, warnings, security settings, and player preferences. Live Discord voice connections are intentionally kept in memory.
+## 🚀 Local Installation
 
-### 📦 `requirements.txt`
-Contains the Python dependencies required to run the project.
-
-### 🔐 `.env.example`
-Example environment configuration intended for storing sensitive values outside the source code.
-
-### 🐳 `Dockerfile`
-Allows the bot to be packaged and deployed in a Docker-based environment.
-
-### 🚀 `fly.toml`
-Deployment configuration for Fly.io.
-
-### 📜 `PRIVACY.md`
-Privacy-related information for the project.
-
-### 📄 `TERMS.md`
-Terms and usage information for the bot/project.
-
-### 🖼️ `assets/`
-Project assets and shared bot branding resources.
-
----
-
-## 🚀 Installation
-
-### 1. Clone the project
-
-```bash
-git clone <YOUR_REPOSITORY_URL>
-cd discord-main
-```
-
-### 2. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Configure the bot
-
-Copy the example environment file:
-
-```bash
+``` bash
+git clone https://github.com/hmb1998/discord.git
+cd discord
+python3 -m pip install -r requirements.txt
 cp .env.example .env
+python3 main.py
 ```
 
-Then add your Discord bot configuration.
-
-**Never publish your real Discord bot token to GitHub.**
-
-### 4. Start the bot
-
-```bash
-python main.py
-```
-
-When the bot starts successfully, it should connect to Discord and register its available commands.
-
----
-
-
-## 🍪 YouTube Cookie Setup — Fly.io
-
-HMB GLOBAL reads YouTube cookies from a file at:
-
-```text
-/app/cookies.txt
-```
-
-This is intentional: very large cookie values should not be passed as a normal environment variable because the process environment has a finite size limit.
-
-In Fly.io, create a secret named:
-
-```text
-YOUTUBE_COOKIE_FILE
-```
-
-The secret value must be the **Base64-encoded contents** of your `cookies.txt` file. Fly.io mounts that secret as `/app/cookies.txt` using the `[[files]]` entry in `fly.toml`.
-
-**Never commit `cookies.txt` or a real cookie to GitHub.**
-
-If an `ALL` cookie export is too large for Fly.io's secret/config limits, export a smaller cookie set for the YouTube site instead.
-
-## 🔒 Security
-
-Keep all secrets outside your public repository.
-
-Recommended:
-
-- Store the Discord token in environment variables.
-- Never upload `.env`.
-- Never paste a real token into `main.py`.
-- If a token is accidentally exposed, immediately regenerate it through the Discord Developer Portal.
-
----
-
-## 🧩 Technology
-
-The project is built around:
-
-- 🐍 Python
-- 🤖 discord.py
-- 🎵 Discord Voice / Music components
-- 🔊 Audio processing
-- 🛡️ Moderation & security systems
-- 🐳 Docker deployment support
-- 🚀 Fly.io deployment configuration
-
----
-
-## 💎 What HMB Can Do
-
-HMB GLOBAL is designed as an **all-in-one Discord bot** rather than a simple music player.
-
-It can:
-
-**🎵 Play Music**  
-Join a voice channel, play tracks, manage queues, control volume, search music, and handle playback.
-
-**📚 Manage Your Music**  
-Create playlists, save favorites, view history, and replay tracks.
-
-**🎛️ Customize Audio**  
-Apply effects such as Bass Boost, Nightcore, Vaporwave, Slow, Speed, Equalizer, and Karaoke.
-
-**🛡️ Protect Your Server**  
-Use moderation and security tools to help control spam, unwanted links/invites, excessive mentions, and problematic activity.
-
-**⚙️ Manage Your Server**  
-Use utility and moderation commands for everyday Discord server management.
-
----
-
-## 🌟 HMB Philosophy
-
-HMB GLOBAL is built with one goal:
-
-> **One bot. One system. Complete Discord control.**
-
-From music and playlists to moderation, security, and server utilities, HMB brings the most important features together inside a single Discord bot.
-
----
-
-## 👑 HMB GLOBAL
-
-**HMB GLOBAL**  
-Professional • Powerful • Fast • Secure
-
-Made for Discord communities that want music, moderation, security, and utility features in one place.
-
----
-
-### ⚠️ Disclaimer
-
-This README describes the project based on the provided source package. Exact behavior can depend on Discord API changes, dependency versions, external music providers, deployment environment, and the bot's configuration.
-
-## 🧪 Quality Checks
-
-The project includes automated checks for Python syntax, the expected **100 Slash Commands**, branding consistency, and SQLite persistence round-trips. GitHub Actions runs these checks on pushes and pull requests.
+Set your Discord bot token and other required values in the environment.
+Never commit `.env` or real secrets.
 
 ## 🚀 Fly.io Deployment
 
-This version is configured to deploy **without a Fly.io volume**.
+Current application:
 
-The SQLite database uses:
-
-```text
-/app/data/hmb_global.sqlite3
+``` text
+hmb-global-bot
 ```
 
-The directory is created by the application as needed. Because there is no persistent Fly volume in this version, SQLite data is **not guaranteed to survive a machine replacement or redeploy**.
+Typical deployment:
 
-Set the real Discord token only as a Fly.io secret:
-
-```text
-DISCORD_TOKEN
-```
-
-Never commit a real bot token to GitHub.
-
-# Fly.io redeploy trigger
-
-
-## Fly.io YouTube setup (fixed)
-
-This project expects the YouTube cookie export as a **base64-encoded Fly.io secret**
-mounted at `/app/cookies.txt`. Do not put the cookie file in this repository.
-
-On Termux/Linux, set it with:
-
-```bash
-fly secrets set YOUTUBE_COOKIE_FILE="$(base64 < /path/to/cookies.txt | tr -d '\n')" -a hmb-global-bot
-```
-
-Then deploy:
-
-```bash
+``` bash
+fly auth login
 fly deploy -a hmb-global-bot
-fly logs -a hmb-global-bot --no-tail
+fly logs -a hmb-global-bot
 ```
 
-At startup the bot prints only safe diagnostics such as `Cookie file: OK` and the
-Deno executable path; it never prints cookie contents.
+Set secrets through Fly.io:
 
-The image installs Deno and exposes it at `/usr/local/bin/deno`. yt-dlp's EJS
-support is enabled for current YouTube JavaScript challenges.
+``` bash
+fly secrets set DISCORD_TOKEN="YOUR_DISCORD_BOT_TOKEN" -a hmb-global-bot
+```
+
+Configure the `YOUTUBE_COOKIE_FILE` secret for YouTube cookie support.
+
+## 🔐 Security Rules
+
+Never commit:
+
+-   ❌ Discord bot tokens
+-   ❌ YouTube cookies
+-   ❌ `.env` files containing secrets
+-   ❌ Private credentials
+
+Use Fly.io secrets or environment variables for sensitive configuration.
+If a credential is exposed, revoke/rotate it immediately.
+
+## 🧩 Runtime Architecture
+
+``` text
+Discord
+   │
+   ▼
+HMB GLOBAL (Python)
+   │
+   ├── Discord Slash Commands
+   ├── Voice / Music Engine
+   ├── yt-dlp + Deno
+   ├── FFmpeg
+   ├── SQLite Persistence
+   ├── Audio Cache + Automatic Cleanup
+   ├── Moderation / Security
+   └── Flask Health Endpoint
+          │
+          ▼
+       Fly.io
+```
+
+## 📜 Documentation
+
+-   [`PRIVACY.md`](PRIVACY.md) --- privacy information
+-   [`TERMS.md`](TERMS.md) --- project usage terms
+-   [`FIXES.md`](FIXES.md) --- fixes and maintenance notes
+-   [`.env.example`](.env.example) --- safe configuration template
+-   [`fly.toml`](fly.toml) --- Fly.io deployment configuration
+
+## 👑 HMB GLOBAL
+
+> **One bot. One system. Complete Discord control.**
+
+Built for communities that want music, voice playback, playlists,
+moderation, security, and useful server tools in one professional
+Discord bot.
+
+**HMB GLOBAL --- Smart • Secure • Powerful.**
+
+## ⚠️ Disclaimer
+
+HMB GLOBAL depends on Discord, YouTube/media providers, yt-dlp, FFmpeg,
+and other external services/software. Availability and behavior can
+change when external APIs, media providers, or dependency versions
+change.
+
+This README documents the repository's current architecture and
+configuration; the source code is the final authority for exact
+implementation details.
