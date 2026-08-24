@@ -965,7 +965,7 @@ async def play_next(guild_id, expected_generation=None):
 
             source = discord.FFmpegPCMAudio(
                 audio_file,
-                **build_ffmpeg_options({}, guild_id=guild_id),
+                **build_ffmpeg_options(info, guild_id=guild_id),
             )
 
             # Only mark the song as current after the local source is ready.
@@ -2254,10 +2254,10 @@ async def bassboost(interaction: discord.Interaction):
     state["bassboost"] = not state.get("bassboost", False)
 
     status = "ON 🔥" if state["bassboost"] else "OFF ❌"
+
     await interaction.response.send_message(
-        f"🔊 **Bass Boost:** {status}
-"
-        "🎵 Effect will apply to the next playback/restart."
+        f"🔊 **Bass Boost:** {status}\n"
+        "🎵 Real FFmpeg bass boost will apply to the next playback/restart."
     )
 
 
@@ -2274,10 +2274,10 @@ async def nightcore(interaction: discord.Interaction):
         state["vaporwave"] = False
 
     status = "ON ⚡" if state["nightcore"] else "OFF ❌"
+
     await interaction.response.send_message(
-        f"⚡ **Nightcore:** {status}
-"
-        "🎵 Pitch + speed effect enabled."
+        f"⚡ **Nightcore:** {status}\n"
+        "🎵 Real FFmpeg pitch + speed effect enabled."
     )
 
 
@@ -2294,18 +2294,27 @@ async def vaporwave(interaction: discord.Interaction):
         state["nightcore"] = False
 
     status = "ON 🌊" if state["vaporwave"] else "OFF ❌"
+
     await interaction.response.send_message(
-        f"🌊 **Vaporwave:** {status}
-"
-        "🎵 Pitch-down effect enabled."
+        f"🌊 **Vaporwave:** {status}\n"
+        "🎵 Real FFmpeg pitch-down effect enabled."
     )
 
 
-@bot.tree.command(name='slow', description='🎛 Slow down playback')
+@bot.tree.command(name='slow', description='🎛 Set playback speed to 0.5x')
 async def slow(interaction: discord.Interaction):
     if not await voice_check(interaction):
         return
-    await interaction.response.send_message("🎛 **Slow Mode:** Use `/speed 0.5` for slow playback")
+
+    guild_id = interaction.guild_id
+    state = AUDIO_EFFECTS.setdefault(guild_id, {})
+    state["speed"] = 0.5
+
+    await interaction.response.send_message(
+        "🐌 **Slow Mode:** `0.5x`\n"
+        "🎵 Real FFmpeg speed filter enabled."
+    )
+
 
 @bot.tree.command(name='speed', description='🎛 Change real playback speed (0.5-2.0)')
 @app_commands.describe(multiplier='Speed multiplier (0.5-2.0)')
@@ -2325,9 +2334,8 @@ async def speed(interaction: discord.Interaction, multiplier: float):
     state["speed"] = multiplier
 
     await interaction.response.send_message(
-        f"⚡ **Playback Speed:** `{multiplier}x`
-"
-        "🎵 Real FFmpeg speed filter enabled."
+        f"⚡ **Playback Speed:** `{multiplier}x`\n"
+        "🎵 Real FFmpeg speed filter enabled for next playback/restart."
     )
 
 
@@ -2351,9 +2359,8 @@ async def equalizer(interaction: discord.Interaction, preset: str):
     state["equalizer"] = preset
 
     await interaction.response.send_message(
-        f"🎚️ **Equalizer:** `{preset}`
-"
-        "🎵 Real FFmpeg EQ enabled."
+        f"🎚️ **Equalizer:** `{preset}`\n"
+        "🎵 Real FFmpeg EQ enabled for next playback/restart."
     )
 
 
@@ -2369,9 +2376,8 @@ async def karaoke(interaction: discord.Interaction):
     status = "ON 🎤" if state["karaoke"] else "OFF ❌"
 
     await interaction.response.send_message(
-        f"🎤 **Karaoke:** {status}
-"
-        "🎵 Center-channel vocal reduction enabled."
+        f"🎤 **Karaoke:** {status}\n"
+        "🎵 Real FFmpeg center-channel vocal reduction enabled."
     )
 
 
