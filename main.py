@@ -49,8 +49,8 @@ def _resolve_youtube_cookiefile():
     try:
         with open(runtime_path, "w", encoding="utf-8") as cookie_file:
             cookie_file.write(value)
-            if not value.endswith("\\n"):
-                cookie_file.write("\\n")
+            if not value.endswith("\n"):
+                cookie_file.write("\n")
         os.chmod(runtime_path, 0o600)
         return runtime_path
     except OSError as exc:
@@ -573,7 +573,7 @@ async def on_message(message):
 FFMPEG_OPTIONS = {
     'before_options': (
         '-reconnect 1 -reconnect_streamed 1 '
-        '-reconnect_delay_max 5 -nostdin'
+        '-reconnect_delay_max 5 -rw_timeout 15000000 -nostdin'
     ),
     'options': '-vn -b:a 128k'
 }
@@ -592,8 +592,14 @@ def build_ffmpeg_options(info=None, **overrides):
             if value is not None
         ]
         if header_lines:
-            header_blob = '\\r\\n'.join(header_lines) + '\\r\\n'
+            # FFmpeg requires real CRLF separators between HTTP headers.
+            # Do not use the literal characters "\\r\\n".
+            header_blob = '\r\n'.join(header_lines) + '\r\n'
             options['before_options'] += f' -headers {shlex.quote(header_blob)}'
+
+        user_agent = headers.get('User-Agent')
+        if user_agent:
+            options['before_options'] += f' -user_agent {shlex.quote(user_agent)}'
 
     options.update(overrides)
     return options
@@ -625,13 +631,13 @@ YDL_OPTIONS = {
     # Current YouTube JS challenge handling.
     'extractor_args': {
         'youtube': {
-            'player_client': ['default', 'web_embedded'],
+            'player_client': ['default'],
         }
     },
 
     # Keep EJS challenge handling enabled even if yt-dlp changes defaults.
     # Deno is supplied dynamically by build_ydl_options().
-    'remote_components': {'ejs': ['github']},
+    'remote_components': ['ejs:github'],
 
     'socket_timeout': 20,
     'retries': 3,
