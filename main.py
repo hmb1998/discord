@@ -1404,43 +1404,116 @@ async def loop(interaction: discord.Interaction, mode: str):
 async def seek(interaction: discord.Interaction, seconds: int):
     guild_id = interaction.guild_id
     vc = get_vc(guild_id)
+
     if not vc or not vc.is_playing():
-        await interaction.response.send_message("❌ Nothing is playing", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ Nothing is playing",
+            ephemeral=True
+        )
         return
+
     if guild_id not in bot.now_playing:
-        await interaction.response.send_message("❌ No current song info", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ No current song info",
+            ephemeral=True
+        )
         return
-    
+
     song = bot.now_playing[guild_id]
     duration = song.get('duration', 0)
-    if duration and seconds > duration:
-        await interaction.response.send_message(f"❌ Cannot seek past song duration ({format_time(duration)})", ephemeral=True)
-        return
-    
-    # Restart playback at position - we need to recreate the source
-    vc.stop()
-    try:
-        audio_file = None
 
-        download_dir = os.path.join("/tmp", "hmb_audio", str(guild_id))
+    if seconds < 0:
+        await interaction.response.send_message(
+            "❌ Position cannot be negative",
+            ephemeral=True
+        )
+        return
+
+    if duration and seconds > duration:
+        await interaction.response.send_message(
+            f"❌ Cannot seek past song duration ({format_time(duration)})",
+            ephemeral=True
+        )
+        return
+
+    # IMPORTANT:
+    # Downloading the YouTube audio can take longer than
+    # Discord's interaction response window.
+    await interaction.response.defer()
+
+    try:
+        download_dir = os.path.join(
+            "/tmp",
+            "hmb_audio",
+            str(guild_id)
+        )
         os.makedirs(download_dir, exist_ok=True)
 
         options = build_ydl_options()
         options.update({
-            'format': 'bestaudio/best',
+            'format': 'bestaudio[ext=m4a]/bestaudio/best',
             'skip_download': False,
             'noplaylist': True,
-            'outtmpl': os.path.join(download_dir, '%(id)s.%(ext)s'),
+            'outtmpl': os.path.join(
+                download_dir,
+                '%(id)s.%(ext)s'
+            ),
             'nopart': False,
             'continuedl': True,
         })
 
-        with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(song['url'], download=True)
-            audio_file = info.get('_filename') or ydl.prepare_filename(info)
+        def download_seek_audio():
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(
+                    song['url'],
+                    download=True
+                )
 
-        if not audio_file or not os.path.isfile(audio_file):
-            raise RuntimeError(f"Downloaded audio file not found: {audio_file}")
+                audio_file = (
+                    info.get('_filename')
+                    or ydl.prepare_filename(info)
+                )
+
+                if not audio_file or not os.path.isfile(audio_file):
+                    video_id = info.get('id')
+
+                    candidates = []
+
+                    if video_id:
+                        candidates = [
+                            os.path.join(
+                                download_dir,
+                                name
+                            )
+                            for name in os.listdir(download_dir)
+                            if name.startswith(video_id + ".")
+                            and not name.endswith(".part")
+                            and not name.endswith(".ytdl")
+                        ]
+
+                    if candidates:
+                        candidates.sort(
+                            key=lambda path: os.path.getmtime(path),
+                            reverse=True
+                        )
+                        audio_file = candidates[0]
+
+                if not audio_file or not os.path.isfile(audio_file):
+                    raise RuntimeError(
+                        f"Downloaded audio file not found: {audio_file}"
+                    )
+
+                return info, audio_file
+
+        info, audio_file = await asyncio.to_thread(
+            download_seek_audio
+        )
+
+        print(f"🎵 Seek audio ready: {audio_file}")
+
+        # Stop the current source only after the download succeeded.
+        if vc.is_playing():
+            vc.stop()
 
         seek_opts = build_ffmpeg_options(info)
         seek_opts['before_options'] += f' -ss {seconds}'
@@ -1449,16 +1522,61 @@ async def seek(interaction: discord.Interaction, seconds: int):
             audio_file,
             **seek_opts
         )
-        vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop))
-        vc.source = discord.PCMVolumeTransformer(vc.source)
+
+        def after_seek(error):
+            if error:
+                print(f"Seek playback error: {error}")
+
+            try:
+                if audio_file and os.path.exists(audio_file):
+                    os.remove(audio_file)
+                    print(
+                        f"🧹 Removed temporary seek audio: {audio_file}"
+                    )
+            except Exception as cleanup_error:
+                print(
+                    f"⚠️ Seek audio cleanup failed: {cleanup_error}"
+                )
+
+            coro = play_next(guild_id)
+            asyncio.run_coroutine_threadsafe(
+                coro,
+                bot.loop
+            )
+
+        vc.play(
+            source,
+            after=after_seek
+        )
+
+        vc.source = discord.PCMVolumeTransformer(
+            vc.source
+        )
         vc.source.volume = DEFAULT_VOLUME
-        
-        await interaction.response.send_message(f"⏩ **Seeked to** {format_time(seconds)}")
+
+        await interaction.followup.send(
+            f"⏩ **Seeked to** {format_time(seconds)}"
+        )
+
     except Exception as e:
-        await interaction.response.send_message(f"❌ Seek error: {str(e)[:100]}", ephemeral=True)
-        # Replay without seek
-        coro = play_next(guild_id)
-        asyncio.run_coroutine_threadsafe(coro, bot.loop)
+        print(
+            f"❌ Seek error: "
+            f"{type(e).__name__}: {e}"
+        )
+
+        try:
+            await interaction.followup.send(
+                f"❌ Seek error: {str(e)[:150]}",
+                ephemeral=True
+            )
+        except Exception as followup_error:
+            print(
+                f"⚠️ Could not send seek error: "
+                f"{type(followup_error).__name__}: "
+                f"{followup_error}"
+            )
+
+# ===== 17. MOVESONG =====
 
 # ===== 17. MOVESONG =====
 @bot.tree.command(name='move', description='↕️ Move a song to a different position in queue')
