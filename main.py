@@ -1104,18 +1104,41 @@ async def resume(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Nothing is paused", ephemeral=True)
 
 # ===== 5. SKIP =====
-@bot.tree.command(name='skip', description='⏭ Skip the current song')
-@app_commands.describe(count='Number of songs to skip (default: 1)')
+@bot.tree.command(name='skip', description='Skip the current song')
 async def skip(interaction: discord.Interaction, count: Optional[int] = 1):
-    guild_id = interaction.guild_id
-    vc = get_vc(guild_id)
-    if vc and vc.is_playing():
-        for _ in range(min(count, len(bot.queues.get(guild_id, [])) + 1)):
-            vc.stop()
-            await asyncio.sleep(0.05)
-        await interaction.response.send_message(f"⏭ **Skipped** {'x'+str(count) if count > 1 else ''} ⏭")
-    else:
-        await interaction.response.send_message("❌ Nothing is playing", ephemeral=True)
+    try:
+        await interaction.response.defer()
+
+        guild_id = interaction.guild_id
+        vc = get_vc(guild_id)
+
+        if not vc or not vc.is_connected() or not vc.is_playing():
+            await interaction.followup.send("❌ Nothing is playing.")
+            return
+
+        count = max(1, count or 1)
+        queue = bot.queues.get(guild_id, [])
+
+        skipped = min(count, len(queue) + 1)
+
+        vc.stop()
+
+        await asyncio.sleep(0.15)
+
+        await interaction.followup.send(
+            f"⏭️ **Skipped {skipped} song{'s' if skipped > 1 else ''}.**"
+        )
+
+    except Exception as e:
+        print(f"❌ SKIP ERROR: {type(e).__name__}: {e}")
+        try:
+            await interaction.followup.send(
+                "❌ Skip failed. Check bot logs.",
+                ephemeral=True
+            )
+        except Exception:
+            pass
+
 
 # ===== 6. STOP =====
 @bot.tree.command(name='stop', description='⏹ Stop playback and clear queue')
