@@ -611,6 +611,11 @@ YDL_OPTIONS = {
     'noplaylist': True,
     'extract_flat': False,
     'default_search': 'ytsearch',
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['web_embedded'],
+        },
+    },
     'skip_download': True,
 
     'user_agent': (
