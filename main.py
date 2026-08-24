@@ -62,8 +62,10 @@ def _find_deno():
     """Find a supported Deno runtime in Fly.io/container environments."""
     candidates = [
         os.getenv("DENO_PATH"),
-        "/root/.deno/bin/deno",
         shutil.which("deno"),
+        "/usr/local/bin/deno",
+        "/root/.deno/bin/deno",
+        "/app/.deno/bin/deno",
     ]
     seen = set()
     for candidate in candidates:
@@ -100,7 +102,7 @@ def build_ydl_options(**overrides):
 
     deno_path = _find_deno()
     if deno_path:
-        options["js_runtimes"] = {"deno": deno_path}
+        options["js_runtimes"] = {"deno": {}}
         print(f"✅ YouTube JS runtime: Deno ({deno_path})")
     else:
         print("❌ Deno was not found; YouTube JS challenges may fail.")
@@ -626,6 +628,10 @@ YDL_OPTIONS = {
             'player_client': ['default', 'web_embedded'],
         }
     },
+
+    # Keep EJS challenge handling enabled even if yt-dlp changes defaults.
+    # Deno is supplied dynamically by build_ydl_options().
+    'remote_components': {'ejs': ['github']},
 
     'socket_timeout': 20,
     'retries': 3,
@@ -2384,11 +2390,32 @@ async def queue_clear_after(interaction: discord.Interaction):
 async def uptime_seconds(interaction: discord.Interaction):
     await interaction.response.send_message(f"⏱ **Uptime:** `{int(time.time() - bot.start_time)}` seconds")
 
+def _startup_youtube_diagnostics():
+    """Print safe YouTube runtime diagnostics; never print cookie contents."""
+    cookie_path = _resolve_youtube_cookiefile()
+    deno_path = _find_deno()
+    print("🔎 YouTube runtime check:")
+    print(f"   Cookie file: {'OK' if cookie_path else 'MISSING'}")
+    if cookie_path:
+        try:
+            print(f"   Cookie size: {os.path.getsize(cookie_path)} bytes")
+        except OSError:
+            pass
+    print(f"   Deno: {deno_path or 'MISSING'}")
+    if deno_path:
+        try:
+            print(f"   Deno executable: {shutil.which('deno') or deno_path}")
+        except Exception:
+            pass
+
+
 if __name__ == '__main__':
     # Fly.io health endpoint. Waitress serves Flask in a background thread
     # while the Discord gateway owns the main thread.
     import threading
     from waitress import serve
+
+    _startup_youtube_diagnostics()
 
     port = int(os.getenv("PORT", "8080"))
     threading.Thread(

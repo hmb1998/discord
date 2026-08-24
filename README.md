@@ -368,3 +368,28 @@ DISCORD_TOKEN
 Never commit a real bot token to GitHub.
 
 # Fly.io redeploy trigger
+
+
+## Fly.io YouTube setup (fixed)
+
+This project expects the YouTube cookie export as a **base64-encoded Fly.io secret**
+mounted at `/app/cookies.txt`. Do not put the cookie file in this repository.
+
+On Termux/Linux, set it with:
+
+```bash
+fly secrets set YOUTUBE_COOKIE_FILE="$(base64 < /path/to/cookies.txt | tr -d '\n')" -a hmb-global-bot
+```
+
+Then deploy:
+
+```bash
+fly deploy -a hmb-global-bot
+fly logs -a hmb-global-bot --no-tail
+```
+
+At startup the bot prints only safe diagnostics such as `Cookie file: OK` and the
+Deno executable path; it never prints cookie contents.
+
+The image installs Deno and exposes it at `/usr/local/bin/deno`. yt-dlp's EJS
+support is enabled for current YouTube JavaScript challenges.

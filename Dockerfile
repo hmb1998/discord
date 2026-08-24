@@ -18,7 +18,10 @@ RUN apt-get update \
 # YouTube now needs a supported JavaScript runtime for full yt-dlp support.
 # Deno is the recommended runtime.
 RUN curl -fsSL https://deno.land/install.sh | sh \
-    && /root/.deno/bin/deno --version
+    && /root/.deno/bin/deno --version \
+    && ln -sf /root/.deno/bin/deno /usr/local/bin/deno \
+    && command -v deno \
+    && deno --version
 
 WORKDIR /app
 
