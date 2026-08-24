@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+*.log
+.DS_Store
+fly.toml.local
+data/
+*.sqlite3
+*.db
+
+# YouTube authentication cookie files
+*youtube*cookies*
+
+# YouTube cookie files
+cookies.txt
+*.cookies.txt

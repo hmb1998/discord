@@ -1,0 +1,44 @@
+# fly.toml app configuration file generated for hmb-global-bot on 2026-08-23T20:36:50Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = "hmb-global-bot"
+primary_region = "fra"
+
+[build]
+
+[env]
+  DB_PATH = "/app/data/hmb_global.sqlite3"
+  FLASK_DEBUG = "0"
+  PORT = "8080"
+  PYTHONDONTWRITEBYTECODE = "1"
+  PYTHONUNBUFFERED = "1"
+
+[[mounts]]
+  source = "hmb_data"
+  destination = "/app/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '30s'
+    method = 'GET'
+    path = "/healthz"
+
+[[files]]
+  guest_path = "/app/cookies.txt"
+  secret_name = "YOUTUBE_COOKIE_FILE"
+
+[[vm]]
+  memory = '1024mb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
