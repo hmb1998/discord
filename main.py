@@ -934,6 +934,147 @@ def _cleanup_audio_cache(guild_id):
             pass
 
 
+
+# ============================================================
+# SMART PREFETCH ENGINE V1
+# ============================================================
+
+_prefetch_tasks = {}
+_prefetch_locks = {}
+
+
+def _get_prefetch_lock(guild_id):
+    lock = _prefetch_locks.get(guild_id)
+
+    if lock is None:
+        lock = asyncio.Lock()
+        _prefetch_locks[guild_id] = lock
+
+    return lock
+
+
+async def _prefetch_next(guild_id):
+    """Download the next queued song into cache before it is needed."""
+    lock = _get_prefetch_lock(guild_id)
+
+    if lock.locked():
+        return
+
+    async with lock:
+        async with _get_playback_lock(guild_id):
+            queue = bot.queues.get(guild_id, [])
+
+            if not queue:
+                return
+
+            next_song = queue[0].copy()
+
+        video_id = next_song.get("id")
+
+        if not video_id:
+            print("⚠️ Prefetch skipped: song has no YouTube ID.")
+            return
+
+        cached = _get_cached_audio(guild_id, video_id)
+
+        if cached:
+            print(f"⚡ Prefetch cache HIT: {cached}")
+            return
+
+        download_dir = os.path.join(
+            os.getenv(
+                "AUDIO_DOWNLOAD_DIR",
+                "/data/data/com.termux/files/home/discord/data/hmb_audio",
+            ),
+            str(guild_id),
+        )
+
+        os.makedirs(download_dir, exist_ok=True)
+
+        def download_prefetch():
+            existing = _get_cached_audio(guild_id, video_id)
+
+            if existing:
+                return existing
+
+            options = build_ydl_options().copy()
+            options.update({
+                "format": "bestaudio[ext=m4a]/bestaudio/best",
+                "skip_download": False,
+                "noplaylist": True,
+                "outtmpl": os.path.join(
+                    download_dir,
+                    "%(id)s.%(ext)s",
+                ),
+                "nopart": False,
+                "continuedl": True,
+            })
+
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(
+                    next_song["url"],
+                    download=True,
+                )
+
+                filepath = _find_downloaded_audio(
+                    info,
+                    download_dir,
+                )
+
+                if not filepath:
+                    raise RuntimeError(
+                        "Prefetch audio file not found. "
+                        f"Video ID: {video_id}"
+                    )
+
+                return filepath
+
+        try:
+            print(
+                f"🚀 Prefetch starting: "
+                f"{next_song.get('title', 'Unknown')}"
+            )
+
+            audio_file = await asyncio.to_thread(
+                download_prefetch
+            )
+
+            print(f"💾 Prefetch cached: {audio_file}")
+
+            await asyncio.to_thread(
+                _cleanup_audio_cache,
+                guild_id,
+            )
+
+        except Exception as exc:
+            print(
+                f"⚠️ Prefetch failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+
+def _start_prefetch(guild_id):
+    """Start prefetch without blocking playback."""
+    task = _prefetch_tasks.get(guild_id)
+
+    if task and not task.done():
+        return
+
+    task = asyncio.create_task(
+        _prefetch_next(guild_id)
+    )
+
+    _prefetch_tasks[guild_id] = task
+
+    def cleanup_prefetch(done_task):
+        current = _prefetch_tasks.get(guild_id)
+
+        if current is done_task:
+            _prefetch_tasks.pop(guild_id, None)
+
+    task.add_done_callback(cleanup_prefetch)
+
+
 def _find_downloaded_audio(info, download_dir):
     """Return the actual final media filepath produced by yt-dlp."""
     candidates = []
@@ -1182,6 +1323,10 @@ async def play_next(guild_id, expected_generation=None):
             vc.play(source, after=cleanup_audio)
             vc.source = discord.PCMVolumeTransformer(vc.source)
             vc.source.volume = DEFAULT_VOLUME
+
+            # Start downloading the next queued song in the background.
+            # Playback is not blocked by prefetch.
+            _start_prefetch(guild_id)
 
         except Exception as exc:
             print(f"❌ Error in playback: {type(exc).__name__}: {exc}")
