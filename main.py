@@ -642,7 +642,7 @@ YDL_OPTIONS = {
 
     # Keep EJS challenge handling enabled even if yt-dlp changes defaults.
     # Deno is supplied dynamically by build_ydl_options().
-    'remote_components': ['ejs:github'],
+    'remote_components': ['ejs:npm'],
 
     'socket_timeout': 20,
     'retries': 3,
