@@ -577,8 +577,8 @@ async def on_message(message):
 
 FFMPEG_OPTIONS = {
     'before_options': (
-        ''
-        '-nostdin'
+        '-reconnect 1 -reconnect_streamed 1 '
+        '-reconnect_delay_max 5 -rw_timeout 15000000 -nostdin'
     ),
     'options': '-vn -b:a 128k'
 }
@@ -688,25 +688,19 @@ def format_time(seconds):
     return f"{m}:{s:02d}"
 
 async def get_voice_client(ctx_or_interaction):
-    """Get or connect the bot to the user's voice channel safely."""
+    """Helper to get or connect voice client safely for interactions and prefix commands."""
 
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-
-    if is_interaction:
+    if isinstance(ctx_or_interaction, discord.Interaction):
         user = ctx_or_interaction.user
         guild = ctx_or_interaction.guild
 
         async def respond(message, **kwargs):
-            try:
-                if ctx_or_interaction.response.is_done():
-                    return await ctx_or_interaction.followup.send(
-                        message, **kwargs
-                    )
-                return await ctx_or_interaction.response.send_message(
-                    message, **kwargs
-                )
-            except (discord.NotFound, discord.HTTPException, discord.Forbidden):
-                return None
+            # /play already calls defer(), so after that we MUST use followup.
+            if ctx_or_interaction.response.is_done():
+                return await ctx_or_interaction.followup.send(message, **kwargs)
+            return await ctx_or_interaction.response.send_message(
+                message, **kwargs
+            )
 
         response_kwargs = {"ephemeral": True}
 
@@ -718,15 +712,21 @@ async def get_voice_client(ctx_or_interaction):
         )
         guild = ctx_or_interaction.guild
 
-        async def respond(message, **kwargs):
-            return await ctx_or_interaction.send(message, **kwargs)
+        if hasattr(ctx_or_interaction, "send"):
+            async def respond(message, **kwargs):
+                return await ctx_or_interaction.send(message, **kwargs)
+        else:
+            async def respond(message, **kwargs):
+                return await ctx_or_interaction.response.send_message(
+                    message, **kwargs
+                )
 
         response_kwargs = {}
 
     if not user.voice:
         await respond(
             "❌ You must be in a voice channel first!",
-            **response_kwargs
+            **response_kwargs,
         )
         return None, None
 
@@ -750,12 +750,11 @@ async def get_voice_client(ctx_or_interaction):
         except Exception as e:
             await respond(
                 f"❌ Could not connect: {str(e)[:100]}",
-                **response_kwargs
+                **response_kwargs,
             )
             return None, None
 
     return vc, respond
-
 
 def _get_playback_lock(guild_id):
     lock = bot.playback_locks.get(guild_id)
@@ -870,7 +869,7 @@ async def play_next(guild_id, expected_generation=None):
         bot.playback_generation[guild_id] = current_generation + 1
         generation = bot.playback_generation[guild_id]
 
-        download_dir = os.path.join(os.getenv("AUDIO_DOWNLOAD_DIR", "/data/data/com.termux/files/home/discord/data/hmb_audio"), str(guild_id))
+        download_dir = os.path.join("/tmp", "hmb_audio", str(guild_id))
         os.makedirs(download_dir, exist_ok=True)
         audio_file = None
 
@@ -910,9 +909,9 @@ async def play_next(guild_id, expected_generation=None):
             print(f"🎵 Local audio ready: {audio_file}")
 
             source = discord.FFmpegPCMAudio(
-            audio_file,
-            **build_ffmpeg_options({}),
-        )
+                audio_file,
+                **build_ffmpeg_options(info),
+            )
 
             # Only mark the song as current after the local source is ready.
             bot.now_playing[guild_id] = song
@@ -1220,83 +1219,36 @@ async def unlockdown(interaction: discord.Interaction):
 @bot.tree.command(name='play', description='🎵 Play a song or add to queue')
 @app_commands.describe(query='Song name or YouTube URL')
 async def play(interaction: discord.Interaction, query: str):
-    """Play a song safely without double-acknowledging Discord."""
+    # Discord Interaction may already have been acknowledged by another handler.
+    # Never call response.defer() twice.
+    if not interaction.response.is_done():
+        await interaction.response.defer()
 
-    message = None
-
-    # First response must happen only once.
-    try:
-        if not interaction.response.is_done():
-            await interaction.response.defer(thinking=True)
-        else:
-            print(
-                f"⚠️ /play interaction already acknowledged: "
-                f"id={interaction.id}"
-            )
-    except discord.NotFound:
-        print(
-            f"❌ /play interaction expired: id={interaction.id}"
-        )
-        return
-    except discord.HTTPException as exc:
-        # Discord error 40060 means another response already acknowledged
-        # this interaction. Continue using followup instead of crashing.
-        if getattr(exc, "code", None) == 40060:
-            print(
-                f"⚠️ /play interaction already acknowledged by Discord: "
-                f"id={interaction.id}"
-            )
-        else:
-            print(
-                f"❌ /play acknowledgement failed: "
-                f"{type(exc).__name__}: {exc}"
-            )
-            return
-
-    # Voice check uses followup if the interaction is already acknowledged.
     if not await voice_check(interaction):
         return
-
+    
     vc, _ = await get_voice_client(interaction)
     if not vc:
         return
-
+    
     guild_id = interaction.guild_id
-
-    try:
-        song = await asyncio.to_thread(search_youtube, query)
-    except Exception as exc:
-        await interaction.followup.send(
-            f"❌ YouTube search failed: {type(exc).__name__}: {str(exc)[:150]}",
-            ephemeral=True,
-        )
-        return
-
+    song = await asyncio.to_thread(search_youtube, query)
+    
     if 'error' in song:
-        await interaction.followup.send(
-            f"❌ {song['error']}",
-            ephemeral=True,
-        )
+        await interaction.followup.send(f"❌ {song['error']}", ephemeral=True)
         return
-
+    
     if guild_id not in bot.queues:
         bot.queues[guild_id] = []
-
+    
     bot.queues[guild_id].append(song)
-
+    
     if not vc.is_playing():
-        await interaction.followup.send(
-            f"▶️ **Now Playing:** [{song['title']}]({song['url']}) "
-            f"(`{format_time(song['duration'])}`)"
-        )
+        await interaction.followup.send(f"▶️ **Now Playing:** [{song['title']}]({song['url']}) (`{format_time(song['duration'])}`)")
         await play_next(guild_id)
     else:
         position = len(bot.queues[guild_id])
-        await interaction.followup.send(
-            f"✅ **Added to Queue** (#{position}): "
-            f"[{song['title']}]({song['url']}) "
-            f"(`{format_time(song['duration'])}`)"
-        )
+        await interaction.followup.send(f"✅ **Added to Queue** (#{position}): [{song['title']}]({song['url']}) (`{format_time(song['duration'])}`)")
 
 # ===== 2. PLAY TOP =====
 @bot.tree.command(name='playtop', description='🎵 Add a song to the top of the queue')
@@ -1608,7 +1560,7 @@ async def seek(interaction: discord.Interaction, seconds: int):
     # Downloading can take longer than Discord's interaction window.
     await interaction.response.defer()
 
-    download_dir = os.path.join(os.getenv("AUDIO_DOWNLOAD_DIR", "/data/data/com.termux/files/home/discord/data/hmb_audio"), str(guild_id))
+    download_dir = os.path.join("/tmp", "hmb_audio", str(guild_id))
     os.makedirs(download_dir, exist_ok=True)
 
     # Capture the source generation. If skip/stop/another seek happens while
@@ -2308,7 +2260,7 @@ async def radio(interaction: discord.Interaction, station: str):
     bot.queues[guild_id] = []
     
     try:
-        ffmpeg_opts = {"before_options": "-nostdin", "options": "-vn -b:a 128k"}
+        ffmpeg_opts = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
         source = discord.FFmpegPCMAudio(station, **ffmpeg_opts)
         vc.play(source)
         vc.source = discord.PCMVolumeTransformer(vc.source)

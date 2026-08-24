@@ -577,8 +577,8 @@ async def on_message(message):
 
 FFMPEG_OPTIONS = {
     'before_options': (
-        ''
-        '-nostdin'
+        '-reconnect 1 -reconnect_streamed 1 '
+        '-reconnect_delay_max 5 -rw_timeout 15000000 -nostdin'
     ),
     'options': '-vn -b:a 128k'
 }
@@ -910,9 +910,9 @@ async def play_next(guild_id, expected_generation=None):
             print(f"🎵 Local audio ready: {audio_file}")
 
             source = discord.FFmpegPCMAudio(
-            audio_file,
-            **build_ffmpeg_options({}),
-        )
+                audio_file,
+                **build_ffmpeg_options(info),
+            )
 
             # Only mark the song as current after the local source is ready.
             bot.now_playing[guild_id] = song

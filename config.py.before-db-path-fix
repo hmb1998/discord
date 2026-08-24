@@ -23,10 +23,9 @@ if not TOKEN:
 
 DEFAULT_VOLUME = _env_float("DEFAULT_VOLUME", 0.50, 0.0, 1.0)
 
-DB_PATH = os.getenv(
-    "DB_PATH",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "hmb_global.sqlite3"),
-).strip()
+DB_PATH = os.getenv("DB_PATH", "/app/data/hmb_global.sqlite3").strip()
+if not DB_PATH:
+    DB_PATH = "/app/data/hmb_global.sqlite3"
 
 # YouTube cookies are read from a Fly.io file secret.
 # The legacy environment-variable fallback is intentionally disabled by default
