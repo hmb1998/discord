@@ -252,6 +252,12 @@ async def on_ready():
     if not _presence_initialized:
         await set_hmb_presence()
 
+    if not hasattr(bot, "_audio_cache_cleanup_task"):
+        bot._audio_cache_cleanup_task = asyncio.create_task(
+            _periodic_audio_cache_cleanup()
+        )
+        print("🧹 Automatic audio cache cleanup started (10 min).")
+
 
 
 # ---------------------------------------------------------------------------
@@ -949,6 +955,31 @@ def _cleanup_audio_cache(guild_id):
         f"{total_bytes / (1024 * 1024):.1f} MB / 1024 MB "
         f"({kept} files)"
     )
+
+
+
+async def _periodic_audio_cache_cleanup():
+    """Automatically clean audio cache every 10 minutes."""
+    while True:
+        try:
+            cache_root = os.getenv(
+                "AUDIO_DOWNLOAD_DIR",
+                "/app/data/hmb_audio",
+            )
+
+            if os.path.isdir(cache_root):
+                for guild_id in os.listdir(cache_root):
+                    guild_dir = os.path.join(cache_root, guild_id)
+
+                    if os.path.isdir(guild_dir):
+                        _cleanup_audio_cache(guild_id)
+
+                print("🧹 Automatic audio cache cleanup completed.")
+
+        except Exception as exc:
+            print(f"⚠️ Audio cache cleanup error: {type(exc).__name__}: {exc}")
+
+        await asyncio.sleep(600)
 
 
 # ============================================================
