@@ -788,16 +788,37 @@ async def play_next(guild_id):
             with yt_dlp.YoutubeDL(options) as ydl:
                 info = ydl.extract_info(song['url'], download=True)
 
-                filepath = info.get('_filename')
+                # Find the actual downloaded file.
+                # yt-dlp may return a filename that differs from
+                # the final post-processed file extension.
+                filepath = info.get('_filename') or ydl.prepare_filename(info)
 
-                if not filepath:
-                    filepath = ydl.prepare_filename(info)
+                if not os.path.isfile(filepath):
+                    video_id = info.get('id')
+
+                    candidates = []
+                    if video_id:
+                        candidates = [
+                            os.path.join(download_dir, name)
+                            for name in os.listdir(download_dir)
+                            if name.startswith(f"{video_id}.")
+                            and not name.endswith(".part")
+                            and not name.endswith(".ytdl")
+                        ]
+
+                    if candidates:
+                        candidates.sort(
+                            key=lambda path: os.path.getmtime(path),
+                            reverse=True
+                        )
+                        filepath = candidates[0]
 
                 if not os.path.isfile(filepath):
                     raise RuntimeError(
                         f"Downloaded audio file not found: {filepath}"
                     )
 
+                print(f"✅ Downloaded audio file: {filepath}")
                 return filepath
 
         audio_file = await asyncio.to_thread(download_audio)
