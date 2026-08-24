@@ -880,7 +880,7 @@ def _get_cached_audio(guild_id, video_id):
 
 
 def _cleanup_audio_cache(guild_id):
-    """Remove old/extra cached audio files."""
+    """Remove expired cached audio and enforce file + size limits."""
     cache_root = os.getenv(
         "AUDIO_DOWNLOAD_DIR",
         "/data/data/com.termux/files/home/discord/data/hmb_audio",
@@ -891,8 +891,9 @@ def _cleanup_audio_cache(guild_id):
         return
 
     now = time.time()
-    files = []
+    remaining = []
 
+    # Remove expired files first.
     for name in os.listdir(guild_dir):
         if name.endswith((".part", ".ytdl", ".temp")):
             continue
@@ -904,35 +905,50 @@ def _cleanup_audio_cache(guild_id):
                 continue
 
             mtime = os.path.getmtime(path)
-            files.append((mtime, path))
 
             if now - mtime > AUDIO_CACHE_MAX_AGE:
                 os.remove(path)
                 print(f"🧹 Cache expired: {path}")
+                continue
+
+            remaining.append((mtime, path, os.path.getsize(path)))
+
         except OSError:
             pass
 
-    # Re-scan remaining files and keep only the newest N.
-    remaining = []
-    for name in os.listdir(guild_dir):
-        path = os.path.join(guild_dir, name)
-        try:
-            if os.path.isfile(path) and not name.endswith(
-                (".part", ".ytdl", ".temp")
-            ):
-                remaining.append((os.path.getmtime(path), path))
-        except OSError:
-            pass
+    # Newest files first.
+    remaining.sort(key=lambda item: item[0], reverse=True)
 
-    remaining.sort(reverse=True)
+    # Keep at most AUDIO_CACHE_MAX_FILES and 1 GB total.
+    max_cache_bytes = 1024 * 1024 * 1024
+    total_bytes = 0
+    kept = 0
 
-    for _, path in remaining[AUDIO_CACHE_MAX_FILES:]:
-        try:
-            os.remove(path)
-            print(f"🧹 Cache limit cleanup: {path}")
-        except OSError:
-            pass
+    for mtime, path, size in remaining:
+        if kept >= AUDIO_CACHE_MAX_FILES:
+            try:
+                os.remove(path)
+                print(f"🧹 Cache file-limit cleanup: {path}")
+            except OSError:
+                pass
+            continue
 
+        if total_bytes + size > max_cache_bytes:
+            try:
+                os.remove(path)
+                print(f"🧹 Cache size-limit cleanup: {path}")
+            except OSError:
+                pass
+            continue
+
+        total_bytes += size
+        kept += 1
+
+    print(
+        f"💾 Cache usage: "
+        f"{total_bytes / (1024 * 1024):.1f} MB / 1024 MB "
+        f"({kept} files)"
+    )
 
 
 # ============================================================
