@@ -1413,33 +1413,54 @@ async def skip(interaction: discord.Interaction, count: Optional[int] = 1):
         await interaction.response.defer()
 
         guild_id = interaction.guild_id
-        vc = get_vc(guild_id)
-
-        if not vc or not vc.is_connected() or not vc.is_playing():
-            await interaction.followup.send("❌ Nothing is playing.")
-            return
-
         count = max(1, count or 1)
-        queue = bot.queues.setdefault(guild_id, [])
 
-        # The current song counts as one skipped item. Remove the additional
-        # queued items now, then start exactly one replacement song.
-        skipped = min(count, len(queue) + 1)
-        for _ in range(max(0, skipped - 1)):
-            if queue:
-                queue.pop(0)
+        async with _get_playback_lock(guild_id):
+            vc = get_vc(guild_id)
 
-        bot.playback_generation[guild_id] += 1
-        vc.stop()
+            if not vc or not vc.is_connected():
+                await interaction.followup.send(
+                    "❌ Nothing is playing."
+                )
+                return
+
+            if not vc.is_playing() and not vc.is_paused():
+                await interaction.followup.send(
+                    "❌ Nothing is playing."
+                )
+                return
+
+            queue = bot.queues.setdefault(guild_id, [])
+
+            # Current song counts as the first skipped song.
+            skipped = min(count, len(queue) + 1)
+
+            # Remove additional queued songs that are being skipped.
+            for _ in range(max(0, skipped - 1)):
+                if queue:
+                    queue.pop(0)
+
+            # Invalidate the current playback callback BEFORE stopping.
+            bot.playback_generation[guild_id] += 1
+
+            if vc.is_playing() or vc.is_paused():
+                vc.stop()
 
         await interaction.followup.send(
-            f"⏭️ **Skipped {skipped} song{'s' if skipped > 1 else ''}.**"
+            f"⏭️ **Skipped {skipped} "
+            f"song{'s' if skipped != 1 else ''}.**"
         )
 
+        # Start the replacement outside the lock.
+        # The old callback is invalidated by generation.
         asyncio.create_task(play_next(guild_id))
 
     except Exception as exc:
-        print(f"❌ SKIP ERROR: {type(exc).__name__}: {exc}")
+        print(
+            f"❌ SKIP ERROR: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
         try:
             await interaction.followup.send(
                 "❌ Skip failed. Check bot logs.",
@@ -1448,28 +1469,61 @@ async def skip(interaction: discord.Interaction, count: Optional[int] = 1):
         except Exception:
             pass
 
+
 # ===== 6. STOP =====
 @bot.tree.command(name='stop', description='⏹ Stop playback and clear queue')
 async def stop(interaction: discord.Interaction):
-    guild_id = interaction.guild_id
-    vc = get_vc(guild_id)
-    if vc and vc.is_connected():
-        # Invalidate the current source callback before stopping it.
-        bot.playback_generation[guild_id] += 1
-        bot.queues[guild_id] = []
-        bot.now_playing.pop(guild_id, None)
+    try:
+        await interaction.response.defer()
 
-        if vc.is_playing() or vc.is_paused():
-            vc.stop()
+        guild_id = interaction.guild_id
+
+        async with _get_playback_lock(guild_id):
+            vc = get_vc(guild_id)
+
+            # Invalidate every old playback callback first.
+            bot.playback_generation[guild_id] += 1
+
+            # Completely clear playback state.
+            bot.queues[guild_id] = []
+            bot.now_playing.pop(guild_id, None)
+
+            if vc and vc.is_connected():
+                if vc.is_playing() or vc.is_paused():
+                    vc.stop()
+
+                try:
+                    await vc.disconnect()
+                except Exception as disconnect_error:
+                    print(
+                        f"⚠️ Voice disconnect error: "
+                        f"{type(disconnect_error).__name__}: "
+                        f"{disconnect_error}"
+                    )
+
+                bot.custom_voice_clients.pop(
+                    guild_id,
+                    None,
+                )
+
+        await interaction.followup.send(
+            "⏹ **Stopped & Disconnected** 👋"
+        )
+
+    except Exception as exc:
+        print(
+            f"❌ STOP ERROR: "
+            f"{type(exc).__name__}: {exc}"
+        )
 
         try:
-            await vc.disconnect()
-        finally:
-            bot.custom_voice_clients.pop(guild_id, None)
+            await interaction.followup.send(
+                "❌ Stop failed. Check bot logs.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
-        await interaction.response.send_message("⏹ **Stopped & Disconnected** 👋")
-    else:
-        await interaction.response.send_message("❌ Not connected", ephemeral=True)
 
 # ===== 7. VOLUME =====
 @bot.tree.command(name='volume', description='🔊 Set the volume (0-100)')
