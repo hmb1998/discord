@@ -584,11 +584,61 @@ FFMPEG_OPTIONS = {
 }
 
 
-def build_ffmpeg_options(info=None, **overrides):
-    """Pass yt-dlp media headers to FFmpeg to reduce YouTube 403 errors."""
+
+AUDIO_EFFECTS = {}
+
+EFFECT_FILTERS = {
+    "bassboost": "bass=g=12:f=120:w=0.8",
+    "nightcore": "asetrate=44100*1.25,aresample=44100,atempo=0.8",
+    "vaporwave": "asetrate=44100*0.80,aresample=44100,atempo=1.25",
+    "karaoke": "pan=stereo|c0=c0-c1|c1=c1-c0",
+}
+
+EQUALIZER_FILTERS = {
+    "normal": "",
+    "bass": "equalizer=f=100:t=q:w=1:g=8",
+    "treble": "equalizer=f=8000:t=q:w=1:g=6",
+    "vocal": "equalizer=f=2500:t=q:w=1:g=5",
+    "rock": "equalizer=f=100:t=q:w=1:g=5,equalizer=f=3000:t=q:w=1:g=3,equalizer=f=8000:t=q:w=1:g=4",
+    "pop": "equalizer=f=100:t=q:w=1:g=3,equalizer=f=1000:t=q:w=1:g=2,equalizer=f=8000:t=q:w=1:g=4",
+    "electronic": "equalizer=f=80:t=q:w=1:g=6,equalizer=f=5000:t=q:w=1:g=5",
+    "classical": "equalizer=f=100:t=q:w=1:g=3,equalizer=f=10000:t=q:w=1:g=4",
+}
+
+def get_audio_filter(guild_id):
+    state = AUDIO_EFFECTS.get(guild_id, {})
+
+    filters = []
+
+    if state.get("bassboost"):
+        filters.append(EFFECT_FILTERS["bassboost"])
+
+    if state.get("nightcore"):
+        filters.append(EFFECT_FILTERS["nightcore"])
+
+    if state.get("vaporwave"):
+        filters.append(EFFECT_FILTERS["vaporwave"])
+
+    if state.get("karaoke"):
+        filters.append(EFFECT_FILTERS["karaoke"])
+
+    speed = state.get("speed", 1.0)
+    if speed != 1.0 and not state.get("nightcore") and not state.get("vaporwave"):
+        # atempo supports 0.5 - 2.0 directly.
+        filters.append(f"atempo={speed}")
+
+    eq = state.get("equalizer", "normal")
+    eq_filter = EQUALIZER_FILTERS.get(eq, "")
+    if eq_filter:
+        filters.append(eq_filter)
+
+    return ",".join(filters)
+
+def build_ffmpeg_options(info=None, guild_id=None, **overrides):
+    """Build FFmpeg options including YouTube headers and real audio effects."""
     options = dict(FFMPEG_OPTIONS)
     info = info or {}
-    headers = info.get('http_headers') or {}
+    headers = info.get("http_headers") or {}
 
     if headers:
         header_lines = [
@@ -596,15 +646,19 @@ def build_ffmpeg_options(info=None, **overrides):
             for key, value in headers.items()
             if value is not None
         ]
+
         if header_lines:
-            # FFmpeg requires real CRLF separators between HTTP headers.
-            # Do not use the literal characters "\\r\\n".
             header_blob = '\r\n'.join(header_lines) + '\r\n'
             options['before_options'] += f' -headers {shlex.quote(header_blob)}'
 
         user_agent = headers.get('User-Agent')
         if user_agent:
             options['before_options'] += f' -user_agent {shlex.quote(user_agent)}'
+
+    audio_filter = get_audio_filter(guild_id) if guild_id is not None else ""
+
+    if audio_filter:
+        options['options'] = f"-vn -b:a 128k -af {shlex.quote(audio_filter)}"
 
     options.update(overrides)
     return options
@@ -910,9 +964,9 @@ async def play_next(guild_id, expected_generation=None):
             print(f"🎵 Local audio ready: {audio_file}")
 
             source = discord.FFmpegPCMAudio(
-            audio_file,
-            **build_ffmpeg_options({}),
-        )
+                audio_file,
+                **build_ffmpeg_options({}, guild_id=guild_id),
+            )
 
             # Only mark the song as current after the local source is ready.
             bot.now_playing[guild_id] = song
@@ -1667,6 +1721,10 @@ async def seek(interaction: discord.Interaction, seconds: int):
                 "options": "-vn -b:a 128k",
             }
 
+            seek_filter = get_audio_filter(guild_id)
+            if seek_filter:
+                seek_opts["options"] += f" -af {shlex.quote(seek_filter)}"
+
             source = discord.FFmpegPCMAudio(
                 audio_file,
                 **seek_opts,
@@ -2186,23 +2244,62 @@ async def help(interaction: discord.Interaction, category: Optional[str] = 'all'
     await interaction.response.send_message(embed=embed)
 
 # ===== 45-48. EFFECTS =====
-@bot.tree.command(name='bassboost', description='🎛 Toggle bass boost effect')
+@bot.tree.command(name='bassboost', description='🎛 Toggle real bass boost')
 async def bassboost(interaction: discord.Interaction):
     if not await voice_check(interaction):
         return
-    await interaction.response.send_message("🎛 **Bass Boost:** Check your audio client settings (not available on all systems)")
 
-@bot.tree.command(name='nightcore', description='🎛 Toggle nightcore effect')
+    guild_id = interaction.guild_id
+    state = AUDIO_EFFECTS.setdefault(guild_id, {})
+    state["bassboost"] = not state.get("bassboost", False)
+
+    status = "ON 🔥" if state["bassboost"] else "OFF ❌"
+    await interaction.response.send_message(
+        f"🔊 **Bass Boost:** {status}
+"
+        "🎵 Effect will apply to the next playback/restart."
+    )
+
+
+@bot.tree.command(name='nightcore', description='🎛 Toggle real nightcore effect')
 async def nightcore(interaction: discord.Interaction):
     if not await voice_check(interaction):
         return
-    await interaction.response.send_message("🎛 **Nightcore:** Try at your own risk! (effect may vary)")
 
-@bot.tree.command(name='vaporwave', description='🎛 Toggle vaporwave effect')
+    guild_id = interaction.guild_id
+    state = AUDIO_EFFECTS.setdefault(guild_id, {})
+    state["nightcore"] = not state.get("nightcore", False)
+
+    if state["nightcore"]:
+        state["vaporwave"] = False
+
+    status = "ON ⚡" if state["nightcore"] else "OFF ❌"
+    await interaction.response.send_message(
+        f"⚡ **Nightcore:** {status}
+"
+        "🎵 Pitch + speed effect enabled."
+    )
+
+
+@bot.tree.command(name='vaporwave', description='🎛 Toggle real vaporwave effect')
 async def vaporwave(interaction: discord.Interaction):
     if not await voice_check(interaction):
         return
-    await interaction.response.send_message("🎛 **Vaporwave:** Slowing down for that retro feel")
+
+    guild_id = interaction.guild_id
+    state = AUDIO_EFFECTS.setdefault(guild_id, {})
+    state["vaporwave"] = not state.get("vaporwave", False)
+
+    if state["vaporwave"]:
+        state["nightcore"] = False
+
+    status = "ON 🌊" if state["vaporwave"] else "OFF ❌"
+    await interaction.response.send_message(
+        f"🌊 **Vaporwave:** {status}
+"
+        "🎵 Pitch-down effect enabled."
+    )
+
 
 @bot.tree.command(name='slow', description='🎛 Slow down playback')
 async def slow(interaction: discord.Interaction):
@@ -2210,15 +2307,31 @@ async def slow(interaction: discord.Interaction):
         return
     await interaction.response.send_message("🎛 **Slow Mode:** Use `/speed 0.5` for slow playback")
 
-@bot.tree.command(name='speed', description='🎛 Change playback speed (0.5-2.0)')
+@bot.tree.command(name='speed', description='🎛 Change real playback speed (0.5-2.0)')
 @app_commands.describe(multiplier='Speed multiplier (0.5-2.0)')
 async def speed(interaction: discord.Interaction, multiplier: float):
     if multiplier < 0.5 or multiplier > 2.0:
-        await interaction.response.send_message("❌ Speed must be between 0.5 and 2.0", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ Speed must be between **0.5 and 2.0**",
+            ephemeral=True
+        )
         return
-    await interaction.response.send_message(f"🎛 **Speed:** {multiplier}x (reconnect recommended for best results)")
 
-@bot.tree.command(name='equalizer', description='🎛 Set equalizer preset')
+    if not await voice_check(interaction):
+        return
+
+    guild_id = interaction.guild_id
+    state = AUDIO_EFFECTS.setdefault(guild_id, {})
+    state["speed"] = multiplier
+
+    await interaction.response.send_message(
+        f"⚡ **Playback Speed:** `{multiplier}x`
+"
+        "🎵 Real FFmpeg speed filter enabled."
+    )
+
+
+@bot.tree.command(name='equalizer', description='🎛 Set real FFmpeg equalizer')
 @app_commands.choices(preset=[
     app_commands.Choice(name='🎵 Normal', value='normal'),
     app_commands.Choice(name='🔊 Bass', value='bass'),
@@ -2230,14 +2343,38 @@ async def speed(interaction: discord.Interaction, multiplier: float):
     app_commands.Choice(name='🎻 Classical', value='classical')
 ])
 async def equalizer(interaction: discord.Interaction, preset: str):
-    await interaction.response.send_message(f"🎛 **Equalizer:** Set to `{preset}` (software EQ may be needed)")
+    if not await voice_check(interaction):
+        return
 
-# ===== 49. KARAOKE =====
-@bot.tree.command(name='karaoke', description='🎤 Toggle karaoke mode (removes vocals)')
+    guild_id = interaction.guild_id
+    state = AUDIO_EFFECTS.setdefault(guild_id, {})
+    state["equalizer"] = preset
+
+    await interaction.response.send_message(
+        f"🎚️ **Equalizer:** `{preset}`
+"
+        "🎵 Real FFmpeg EQ enabled."
+    )
+
+
+@bot.tree.command(name='karaoke', description='🎤 Toggle real karaoke vocal removal')
 async def karaoke(interaction: discord.Interaction):
-    await interaction.response.send_message("🎤 **Karaoke Mode:** Check audio settings for center channel removal")
+    if not await voice_check(interaction):
+        return
 
-# ===== 50. SLEEP =====
+    guild_id = interaction.guild_id
+    state = AUDIO_EFFECTS.setdefault(guild_id, {})
+    state["karaoke"] = not state.get("karaoke", False)
+
+    status = "ON 🎤" if state["karaoke"] else "OFF ❌"
+
+    await interaction.response.send_message(
+        f"🎤 **Karaoke:** {status}
+"
+        "🎵 Center-channel vocal reduction enabled."
+    )
+
+
 @bot.tree.command(name='sleep', description='💤 Set a sleep timer to stop music')
 @app_commands.describe(minutes='Minutes until stop (1-120)')
 async def sleep(interaction: discord.Interaction, minutes: int):
