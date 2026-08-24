@@ -720,6 +720,7 @@ def search_youtube(query):
                     return {'error': 'No results found'}
                 info = results['entries'][0]
             return {
+                'id': info.get('id'),
                 'url': info['webpage_url'],
                 'title': info.get('title', 'Unknown Title'),
                 'duration': info.get('duration', 0),
@@ -816,6 +817,121 @@ def _get_playback_lock(guild_id):
         lock = asyncio.Lock()
         bot.playback_locks[guild_id] = lock
     return lock
+
+
+
+# ============================================================
+# AUDIO CACHE ENGINE V1
+# ============================================================
+
+AUDIO_CACHE_MAX_AGE = 7 * 24 * 60 * 60  # 7 days
+AUDIO_CACHE_MAX_FILES = 100
+
+
+def _audio_cache_path(guild_id, video_id, ext="m4a"):
+    cache_root = os.getenv(
+        "AUDIO_DOWNLOAD_DIR",
+        "/data/data/com.termux/files/home/discord/data/hmb_audio",
+    )
+    guild_dir = os.path.join(cache_root, str(guild_id))
+    os.makedirs(guild_dir, exist_ok=True)
+    return os.path.join(guild_dir, f"{video_id}.{ext}")
+
+
+def _get_cached_audio(guild_id, video_id):
+    """Return cached audio if it exists and is still valid."""
+    if not video_id:
+        return None
+
+    cache_root = os.getenv(
+        "AUDIO_DOWNLOAD_DIR",
+        "/data/data/com.termux/files/home/discord/data/hmb_audio",
+    )
+    guild_dir = os.path.join(cache_root, str(guild_id))
+
+    if not os.path.isdir(guild_dir):
+        return None
+
+    candidates = []
+    for name in os.listdir(guild_dir):
+        if not name.startswith(video_id + "."):
+            continue
+        if name.endswith((".part", ".ytdl", ".temp")):
+            continue
+
+        path = os.path.join(guild_dir, name)
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
+            candidates.append(path)
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=os.path.getmtime, reverse=True)
+    path = candidates[0]
+
+    # Refresh access time so frequently played files survive cleanup.
+    try:
+        os.utime(path, None)
+    except OSError:
+        pass
+
+    print(f"⚡ Cache HIT: {path}")
+    return path
+
+
+def _cleanup_audio_cache(guild_id):
+    """Remove old/extra cached audio files."""
+    cache_root = os.getenv(
+        "AUDIO_DOWNLOAD_DIR",
+        "/data/data/com.termux/files/home/discord/data/hmb_audio",
+    )
+    guild_dir = os.path.join(cache_root, str(guild_id))
+
+    if not os.path.isdir(guild_dir):
+        return
+
+    now = time.time()
+    files = []
+
+    for name in os.listdir(guild_dir):
+        if name.endswith((".part", ".ytdl", ".temp")):
+            continue
+
+        path = os.path.join(guild_dir, name)
+
+        try:
+            if not os.path.isfile(path):
+                continue
+
+            mtime = os.path.getmtime(path)
+            files.append((mtime, path))
+
+            if now - mtime > AUDIO_CACHE_MAX_AGE:
+                os.remove(path)
+                print(f"🧹 Cache expired: {path}")
+        except OSError:
+            pass
+
+    # Re-scan remaining files and keep only the newest N.
+    remaining = []
+    for name in os.listdir(guild_dir):
+        path = os.path.join(guild_dir, name)
+        try:
+            if os.path.isfile(path) and not name.endswith(
+                (".part", ".ytdl", ".temp")
+            ):
+                remaining.append((os.path.getmtime(path), path))
+        except OSError:
+            pass
+
+    remaining.sort(reverse=True)
+
+    for _, path in remaining[AUDIO_CACHE_MAX_FILES:]:
+        try:
+            os.remove(path)
+            print(f"🧹 Cache limit cleanup: {path}")
+        except OSError:
+            pass
 
 
 def _find_downloaded_audio(info, download_dir):
@@ -923,9 +1039,26 @@ async def play_next(guild_id, expected_generation=None):
         bot.playback_generation[guild_id] = current_generation + 1
         generation = bot.playback_generation[guild_id]
 
-        download_dir = os.path.join(os.getenv("AUDIO_DOWNLOAD_DIR", "/data/data/com.termux/files/home/discord/data/hmb_audio"), str(guild_id))
+        download_dir = os.path.join(
+            os.getenv(
+                "AUDIO_DOWNLOAD_DIR",
+                "/data/data/com.termux/files/home/discord/data/hmb_audio",
+            ),
+            str(guild_id),
+        )
         os.makedirs(download_dir, exist_ok=True)
+
         audio_file = None
+        info = None
+        cache_hit = False
+
+        # ------------------------------------------------------------
+        # CACHE FIRST
+        # ------------------------------------------------------------
+        video_id = song.get("id")
+
+        if video_id:
+            audio_file = _get_cached_audio(guild_id, video_id)
 
         def download_audio():
             options = build_ydl_options().copy()
@@ -933,14 +1066,24 @@ async def play_next(guild_id, expected_generation=None):
                 "format": "bestaudio[ext=m4a]/bestaudio/best",
                 "skip_download": False,
                 "noplaylist": True,
-                "outtmpl": os.path.join(download_dir, "%(id)s.%(ext)s"),
+                "outtmpl": os.path.join(
+                    download_dir,
+                    "%(id)s.%(ext)s",
+                ),
                 "nopart": False,
                 "continuedl": True,
             })
 
             with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(song["url"], download=True)
-                filepath = _find_downloaded_audio(info, download_dir)
+                info = ydl.extract_info(
+                    song["url"],
+                    download=True,
+                )
+
+                filepath = _find_downloaded_audio(
+                    info,
+                    download_dir,
+                )
 
                 if not filepath:
                     raise RuntimeError(
@@ -951,7 +1094,32 @@ async def play_next(guild_id, expected_generation=None):
                 return info, filepath
 
         try:
-            info, audio_file = await asyncio.to_thread(download_audio)
+            if audio_file:
+                cache_hit = True
+
+                # We already have the local media.
+                # yt-dlp is NOT called on a cache hit.
+                print(f"⚡ Using cached audio: {audio_file}")
+
+                info = {
+                    "id": video_id,
+                    "title": song.get("title", "Unknown"),
+                }
+
+            else:
+                info, audio_file = await asyncio.to_thread(
+                    download_audio
+                )
+
+                # The newly downloaded file becomes the cache.
+                print(f"💾 Cached audio: {audio_file}")
+
+                # Remove stale cache entries without touching
+                # the file that is about to play.
+                await asyncio.to_thread(
+                    _cleanup_audio_cache,
+                    guild_id,
+                )
 
             # If skip/seek/stop happened while downloading, never start the
             # stale source that was just downloaded.
@@ -980,12 +1148,18 @@ async def play_next(guild_id, expected_generation=None):
                 if error:
                     print(f"Playback error: {error}")
 
-                try:
-                    if audio_file and os.path.exists(audio_file):
-                        os.remove(audio_file)
-                        print(f"🧹 Removed temporary audio: {audio_file}")
-                except Exception as cleanup_error:
-                    print(f"⚠️ Audio cleanup failed: {cleanup_error}")
+                # Cache V1:
+                # Do NOT delete the audio after playback.
+                # The file is intentionally kept for future Cache HITs.
+                if audio_file and os.path.exists(audio_file):
+                    try:
+                        os.utime(audio_file, None)
+                        print(f"💾 Kept audio in cache: {audio_file}")
+                    except OSError as cache_error:
+                        print(
+                            f"⚠️ Cache timestamp update failed: "
+                            f"{cache_error}"
+                        )
 
                 # Ignore callbacks from an intentionally stopped old source.
                 if bot.playback_generation.get(guild_id) != generation:
