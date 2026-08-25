@@ -826,48 +826,98 @@ def _get_playback_lock(guild_id):
 
 
 
+# Active audio files currently used by playback.
+# Global cache cleanup must never remove these files.
+_active_audio_files = set()
+
+
+def _protect_audio_file(path):
+    if path:
+        _active_audio_files.add(os.path.abspath(path))
+
+
+def _unprotect_audio_file(path):
+    if path:
+        _active_audio_files.discard(os.path.abspath(path))
+
+
+def _is_active_audio_file(path):
+    return os.path.abspath(path) in _active_audio_files
+
+
 # ============================================================
-# AUDIO CACHE ENGINE V1
+# GLOBAL AUDIO CACHE ENGINE V2
 # ============================================================
 
-AUDIO_CACHE_MAX_AGE = 7 * 24 * 60 * 60  # 7 days
-AUDIO_CACHE_MAX_FILES = 100
+# All cache storage uses one configurable root.
+# Fly.io: /app/data/hmb_audio
+# Termux/local: set AUDIO_DOWNLOAD_DIR if a different path is needed.
+AUDIO_CACHE_ROOT = os.getenv(
+    "AUDIO_DOWNLOAD_DIR",
+    "/app/data/hmb_audio",
+)
+
+AUDIO_CACHE_MAX_GB = float(os.getenv("AUDIO_CACHE_MAX_GB", "1.5"))
+AUDIO_CACHE_MAX_FILES = int(os.getenv("AUDIO_CACHE_MAX_FILES", "150"))
+AUDIO_CACHE_MAX_AGE_DAYS = float(os.getenv("AUDIO_CACHE_MAX_AGE_DAYS", "7"))
+AUDIO_CACHE_MIN_FREE_GB = float(os.getenv("AUDIO_CACHE_MIN_FREE_GB", "1"))
+AUDIO_CACHE_TEMP_MAX_AGE = int(
+    os.getenv("AUDIO_CACHE_TEMP_MAX_AGE", "1800")
+)
+AUDIO_CACHE_CLEANUP_INTERVAL = int(
+    os.getenv("AUDIO_CACHE_CLEANUP_INTERVAL", "300")
+)
+
+AUDIO_CACHE_MAX_AGE = AUDIO_CACHE_MAX_AGE_DAYS * 24 * 60 * 60
+AUDIO_CACHE_MAX_BYTES = int(AUDIO_CACHE_MAX_GB * 1024 * 1024 * 1024)
+AUDIO_CACHE_MIN_FREE_BYTES = int(
+    AUDIO_CACHE_MIN_FREE_GB * 1024 * 1024 * 1024
+)
+
+AUDIO_TEMP_SUFFIXES = (".part", ".ytdl", ".temp")
+
+
+def _audio_cache_root():
+    """Return the single cache directory used by the whole bot."""
+    return os.getenv("AUDIO_DOWNLOAD_DIR", AUDIO_CACHE_ROOT)
 
 
 def _audio_cache_path(guild_id, video_id, ext="m4a"):
-    cache_root = os.getenv(
-        "AUDIO_DOWNLOAD_DIR",
-        "/data/data/com.termux/files/home/discord/data/hmb_audio",
-    )
+    cache_root = _audio_cache_root()
     guild_dir = os.path.join(cache_root, str(guild_id))
     os.makedirs(guild_dir, exist_ok=True)
     return os.path.join(guild_dir, f"{video_id}.{ext}")
 
 
 def _get_cached_audio(guild_id, video_id):
-    """Return cached audio if it exists and is still valid."""
+    """Return a valid cached audio file and refresh its access time."""
     if not video_id:
         return None
 
-    cache_root = os.getenv(
-        "AUDIO_DOWNLOAD_DIR",
-        "/data/data/com.termux/files/home/discord/data/hmb_audio",
+    guild_dir = os.path.join(
+        _audio_cache_root(),
+        str(guild_id),
     )
-    guild_dir = os.path.join(cache_root, str(guild_id))
 
     if not os.path.isdir(guild_dir):
         return None
 
     candidates = []
-    for name in os.listdir(guild_dir):
-        if not name.startswith(video_id + "."):
-            continue
-        if name.endswith((".part", ".ytdl", ".temp")):
-            continue
 
-        path = os.path.join(guild_dir, name)
-        if os.path.isfile(path) and os.path.getsize(path) > 0:
-            candidates.append(path)
+    try:
+        for name in os.listdir(guild_dir):
+            if not name.startswith(video_id + "."):
+                continue
+
+            if name.endswith(AUDIO_TEMP_SUFFIXES):
+                continue
+
+            path = os.path.join(guild_dir, name)
+
+            if os.path.isfile(path) and os.path.getsize(path) > 0:
+                candidates.append(path)
+    except OSError:
+        return None
 
     if not candidates:
         return None
@@ -875,7 +925,6 @@ def _get_cached_audio(guild_id, video_id):
     candidates.sort(key=os.path.getmtime, reverse=True)
     path = candidates[0]
 
-    # Refresh access time so frequently played files survive cleanup.
     try:
         os.utime(path, None)
     except OSError:
@@ -885,105 +934,184 @@ def _get_cached_audio(guild_id, video_id):
     return path
 
 
-def _cleanup_audio_cache(guild_id):
-    """Remove expired cached audio and enforce file + size limits."""
-    cache_root = os.getenv(
-        "AUDIO_DOWNLOAD_DIR",
-        "/data/data/com.termux/files/home/discord/data/hmb_audio",
-    )
-    guild_dir = os.path.join(cache_root, str(guild_id))
+def _cleanup_audio_cache(guild_id=None):
+    """
+    Global cache cleanup.
 
-    if not os.path.isdir(guild_dir):
+    guild_id is retained for compatibility with existing callers,
+    but cleanup is intentionally global so every guild shares the
+    same storage budget.
+    """
+    cache_root = _audio_cache_root()
+
+    if not os.path.isdir(cache_root):
         return
 
     now = time.time()
-    remaining = []
+    files = []
+    total_bytes = 0
+    removed = 0
 
-    # Remove expired files first.
-    for name in os.listdir(guild_dir):
-        if name.endswith((".part", ".ytdl", ".temp")):
-            continue
+    # ------------------------------------------------------------
+    # 1. Remove stale temporary download files.
+    # ------------------------------------------------------------
+    for root, _, names in os.walk(cache_root):
+        for name in names:
+            path = os.path.join(root, name)
 
-        path = os.path.join(guild_dir, name)
+            try:
+                if not os.path.isfile(path):
+                    continue
+
+                if name.endswith(AUDIO_TEMP_SUFFIXES):
+                    age = now - os.path.getmtime(path)
+
+                    if age > AUDIO_CACHE_TEMP_MAX_AGE:
+                        if _is_active_audio_file(path):
+                            continue
+                        os.remove(path)
+                        removed += 1
+                        print(f"🧹 Removed stale temp file: {path}")
+
+                    continue
+
+                size = os.path.getsize(path)
+                mtime = os.path.getmtime(path)
+
+                # ------------------------------------------------
+                # 2. Remove expired audio.
+                # ------------------------------------------------
+                if now - mtime > AUDIO_CACHE_MAX_AGE:
+                    if _is_active_audio_file(path):
+                        continue
+                    os.remove(path)
+                    removed += 1
+                    print(f"🧹 Cache expired: {path}")
+                    continue
+
+                files.append((mtime, path, size))
+                total_bytes += size
+
+            except OSError:
+                continue
+
+    # ------------------------------------------------------------
+    # 3. Oldest files first = LRU-style cleanup.
+    # ------------------------------------------------------------
+    files.sort(key=lambda item: item[0])
+
+    # ------------------------------------------------------------
+    # 4. Enforce global file-count + global size limits.
+    # ------------------------------------------------------------
+    while (
+        len(files) > AUDIO_CACHE_MAX_FILES
+        or total_bytes > AUDIO_CACHE_MAX_BYTES
+    ):
+        removable = None
+
+        for index, item in enumerate(files):
+            _, candidate_path, candidate_size = item
+
+            if not _is_active_audio_file(candidate_path):
+                removable = (index, candidate_path, candidate_size)
+                break
+
+        # All remaining files are currently active.
+        # Never loop forever trying to remove protected files.
+        if removable is None:
+            print(
+                "🔒 Cache limit reached, but all remaining "
+                "files are active playback files."
+            )
+            break
+
+        index, path, size = removable
+        files.pop(index)
 
         try:
-            if not os.path.isfile(path):
-                continue
-
-            mtime = os.path.getmtime(path)
-
-            if now - mtime > AUDIO_CACHE_MAX_AGE:
-                os.remove(path)
-                print(f"🧹 Cache expired: {path}")
-                continue
-
-            remaining.append((mtime, path, os.path.getsize(path)))
-
+            os.remove(path)
+            total_bytes -= size
+            removed += 1
+            print(f"🧹 Global cache cleanup: {path}")
         except OSError:
             pass
 
-    # Newest files first.
-    remaining.sort(key=lambda item: item[0], reverse=True)
+    # ------------------------------------------------------------
+    # 5. Protect the disk from getting dangerously full.
+    # ------------------------------------------------------------
+    try:
+        disk_path = cache_root
 
-    # Keep at most AUDIO_CACHE_MAX_FILES and 1 GB total.
-    max_cache_bytes = 1024 * 1024 * 1024
-    total_bytes = 0
-    kept = 0
+        if not os.path.exists(disk_path):
+            disk_path = os.path.dirname(cache_root)
 
-    for mtime, path, size in remaining:
-        if kept >= AUDIO_CACHE_MAX_FILES:
-            try:
-                os.remove(path)
-                print(f"🧹 Cache file-limit cleanup: {path}")
-            except OSError:
-                pass
-            continue
+        free_bytes = shutil.disk_usage(disk_path).free
 
-        if total_bytes + size > max_cache_bytes:
-            try:
-                os.remove(path)
-                print(f"🧹 Cache size-limit cleanup: {path}")
-            except OSError:
-                pass
-            continue
+        if free_bytes < AUDIO_CACHE_MIN_FREE_BYTES:
+            print(
+                f"⚠️ Low disk space: "
+                f"{free_bytes / (1024 ** 3):.2f} GB free. "
+                "Emergency cache cleanup starting."
+            )
 
-        total_bytes += size
-        kept += 1
+            files.sort(key=lambda item: item[0])
+
+            while (
+                files
+                and free_bytes < AUDIO_CACHE_MIN_FREE_BYTES
+            ):
+                _, path, size = files.pop(0)
+
+                if _is_active_audio_file(path):
+                    continue
+
+                try:
+                    os.remove(path)
+                    total_bytes -= size
+                    removed += 1
+
+                    free_bytes = shutil.disk_usage(
+                        disk_path
+                    ).free
+
+                    print(
+                        f"🚨 Emergency cache removal: {path}"
+                    )
+                except OSError:
+                    pass
+
+    except OSError as exc:
+        print(f"⚠️ Disk usage check failed: {exc}")
 
     print(
-        f"💾 Cache usage: "
-        f"{total_bytes / (1024 * 1024):.1f} MB / 1024 MB "
-        f"({kept} files)"
+        "💾 Global cache usage: "
+        f"{total_bytes / (1024 ** 2):.1f} MB / "
+        f"{AUDIO_CACHE_MAX_GB:.2f} GB | "
+        f"{len(files)} files / "
+        f"{AUDIO_CACHE_MAX_FILES} | "
+        f"removed={removed}"
     )
 
 
-
 async def _periodic_audio_cache_cleanup():
-    """Automatically clean audio cache every 10 minutes."""
+    """Run global cache cleanup every few minutes."""
     while True:
         try:
-            cache_root = os.getenv(
-                "AUDIO_DOWNLOAD_DIR",
-                "/app/data/hmb_audio",
+            _cleanup_audio_cache()
+            print("🧹 Global automatic audio cache cleanup completed.")
+        except Exception as exc:
+            print(
+                "⚠️ Audio cache cleanup error: "
+                f"{type(exc).__name__}: {exc}"
             )
 
-            if os.path.isdir(cache_root):
-                for guild_id in os.listdir(cache_root):
-                    guild_dir = os.path.join(cache_root, guild_id)
-
-                    if os.path.isdir(guild_dir):
-                        _cleanup_audio_cache(guild_id)
-
-                print("🧹 Automatic audio cache cleanup completed.")
-
-        except Exception as exc:
-            print(f"⚠️ Audio cache cleanup error: {type(exc).__name__}: {exc}")
-
-        await asyncio.sleep(600)
+        await asyncio.sleep(AUDIO_CACHE_CLEANUP_INTERVAL)
 
 
 # ============================================================
 # SMART PREFETCH ENGINE V1
+# ============================================================
+
 # ============================================================
 
 _prefetch_tasks = {}
@@ -1029,10 +1157,7 @@ async def _prefetch_next(guild_id):
             return
 
         download_dir = os.path.join(
-            os.getenv(
-                "AUDIO_DOWNLOAD_DIR",
-                "/data/data/com.termux/files/home/discord/data/hmb_audio",
-            ),
+            _audio_cache_root(),
             str(guild_id),
         )
 
@@ -1297,10 +1422,7 @@ async def play_next(guild_id, expected_generation=None):
         generation = bot.playback_generation[guild_id]
 
         download_dir = os.path.join(
-            os.getenv(
-                "AUDIO_DOWNLOAD_DIR",
-                "/data/data/com.termux/files/home/discord/data/hmb_audio",
-            ),
+            _audio_cache_root(),
             str(guild_id),
         )
         os.makedirs(download_dir, exist_ok=True)
@@ -1381,11 +1503,17 @@ async def play_next(guild_id, expected_generation=None):
             # If skip/seek/stop happened while downloading, never start the
             # stale source that was just downloaded.
             if bot.playback_generation.get(guild_id) != generation:
-                if audio_file and os.path.exists(audio_file):
+                if (
+                    audio_file
+                    and os.path.exists(audio_file)
+                    and not cache_hit
+                ):
                     os.remove(audio_file)
                 return
 
             print(f"🎵 Local audio ready: {audio_file}")
+
+            _protect_audio_file(audio_file)
 
             source = discord.FFmpegPCMAudio(
                 audio_file,
@@ -1408,6 +1536,8 @@ async def play_next(guild_id, expected_generation=None):
                 # Cache V1:
                 # Do NOT delete the audio after playback.
                 # The file is intentionally kept for future Cache HITs.
+                _unprotect_audio_file(audio_file)
+
                 if audio_file and os.path.exists(audio_file):
                     try:
                         os.utime(audio_file, None)
@@ -1448,11 +1578,17 @@ async def play_next(guild_id, expected_generation=None):
         except Exception as exc:
             print(f"❌ Error in playback: {type(exc).__name__}: {exc}")
 
-            if audio_file and os.path.exists(audio_file):
+            if (
+                audio_file
+                and os.path.exists(audio_file)
+                and not cache_hit
+            ):
                 try:
                     os.remove(audio_file)
                 except OSError:
                     pass
+
+            _unprotect_audio_file(audio_file)
 
             # Put the failed song back so a transient YouTube error does not
             # silently destroy the user's queue.
@@ -2153,7 +2289,7 @@ async def seek(interaction: discord.Interaction, seconds: int):
     # Downloading can take longer than Discord's interaction window.
     await interaction.response.defer()
 
-    download_dir = os.path.join(os.getenv("AUDIO_DOWNLOAD_DIR", "/data/data/com.termux/files/home/discord/data/hmb_audio"), str(guild_id))
+    download_dir = os.path.join(_audio_cache_root(), str(guild_id))
     os.makedirs(download_dir, exist_ok=True)
 
     # Capture the source generation. If skip/stop/another seek happens while
