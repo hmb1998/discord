@@ -274,6 +274,8 @@ ANTI_RAID_LOCKDOWN_SECONDS = int(
 ANTI_RAID_COOLDOWN = float(os.getenv("ANTI_RAID_COOLDOWN", "30"))
 
 # V12.4: Maximum number of waiting songs added through /play.
+# V12.5: Maximum time allowed for one YouTube search.
+PLAY_SEARCH_TIMEOUT = float(os.getenv("PLAY_SEARCH_TIMEOUT", "30"))
 MAX_PLAY_QUEUE = int(os.getenv("MAX_PLAY_QUEUE", "100"))
 
 # Security V3: suspicious account detection.
@@ -2815,7 +2817,17 @@ async def play(interaction: discord.Interaction, query: str):
     guild_id = interaction.guild_id
 
     try:
-        song = await asyncio.to_thread(search_youtube, query)
+        # V12.5: Bound the complete YouTube search operation.
+        song = await asyncio.wait_for(
+            asyncio.to_thread(search_youtube, query),
+            timeout=PLAY_SEARCH_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        await interaction.followup.send(
+            "⏱️ YouTube search timed out. Please try again.",
+            ephemeral=True,
+        )
+        return
     except Exception as exc:
         await interaction.followup.send(
             f"❌ YouTube search failed: {type(exc).__name__}: {str(exc)[:150]}",
