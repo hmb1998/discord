@@ -3346,34 +3346,151 @@ async def volumedown(interaction: discord.Interaction):
 # ===== 10. QUEUE =====
 @bot.tree.command(name='queue', description='📋 Show the song queue')
 async def queue(interaction: discord.Interaction):
+    """Show the current queue safely."""
+
+    # V18.1: Validate guild before reading playback state.
     guild_id = interaction.guild_id
-    await interaction.response.defer()
-    
-    if guild_id not in bot.queues or len(bot.queues[guild_id]) == 0:
-        embed = discord.Embed(title="📋 Queue", description="Queue is empty!", color=discord.Color.orange())
-        await interaction.followup.send(embed=embed)
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    
-    embed = discord.Embed(title=f"📋 Queue - {len(bot.queues[guild_id])} songs", color=discord.Color.blurple())
-    
-    # Now playing
-    if guild_id in bot.now_playing:
-        np = bot.now_playing[guild_id]
-        embed.add_field(name="▶️ Now Playing", value=f"[{np['title']}]({np['url']}) (`{format_time(np['duration'])}`)", inline=False)
-    
-    # Queue list
-    queue_text = ""
-    for i, song in enumerate(bot.queues[guild_id], 1):
-        queue_text += f"`{i}.` [{song['title'][:50]}]({song['url']}) ({format_time(song['duration'])})\n"
-        if len(queue_text) > 1000:
-            queue_text += f"... and {len(bot.queues[guild_id]) - i} more"
-            break
-    
-    if queue_text:
-        embed.add_field(name="📜 Up Next", value=queue_text, inline=False)
-    
-    embed.set_footer(text=f"Loop: {bot.loop_mode.get(guild_id, 'none')} | Shuffle: {'ON' if bot.shuffle_mode.get(guild_id) else 'OFF'}")
-    await interaction.followup.send(embed=embed)
+
+    try:
+        await interaction.response.defer()
+
+        # Snapshot queue state while playback commands are locked.
+        async with _get_playback_lock(guild_id):
+            queue_items = list(bot.queues.get(guild_id, []))
+            now_playing = bot.now_playing.get(guild_id)
+            loop_mode = bot.loop_mode.get(guild_id, "none")
+            shuffle_enabled = bool(bot.shuffle_mode.get(guild_id))
+
+        if not queue_items and not now_playing:
+            embed = discord.Embed(
+                title="📋 Queue",
+                description="Queue is empty!",
+                color=discord.Color.orange(),
+            )
+            embed.set_footer(
+                text=f"Loop: {loop_mode} | "
+                f"Shuffle: {'ON' if shuffle_enabled else 'OFF'}"
+            )
+            await interaction.followup.send(embed=embed)
+            return
+
+        embed = discord.Embed(
+            title=f"📋 Queue - {len(queue_items)} songs",
+            color=discord.Color.blurple(),
+        )
+
+        # Safely render the currently playing song.
+        if isinstance(now_playing, dict):
+            np_title = str(
+                now_playing.get("title") or "Unknown Title"
+            ).replace("\n", " ")
+            np_url = str(now_playing.get("url") or "")
+            np_duration = format_time(
+                now_playing.get("duration", 0)
+            )
+
+            if np_url.startswith(("http://", "https://")):
+                np_value = (
+                    f"[{np_title[:100]}]({np_url}) "
+                    f"(`{np_duration}`)"
+                )
+            else:
+                np_value = (
+                    f"{np_title[:100]} "
+                    f"(`{np_duration}`)"
+                )
+
+            embed.add_field(
+                name="▶️ Now Playing",
+                value=np_value[:1024],
+                inline=False,
+            )
+
+        # Keep the field comfortably below Discord's 1024-character limit.
+        queue_text = ""
+        shown = 0
+
+        for i, song in enumerate(queue_items, 1):
+            if not isinstance(song, dict):
+                continue
+
+            title = str(
+                song.get("title") or "Unknown Title"
+            ).replace("\n", " ")
+
+            url = str(song.get("url") or "")
+            duration = format_time(
+                song.get("duration", 0)
+            )
+
+            title = title[:50]
+
+            if url.startswith(("http://", "https://")):
+                line = (
+                    f"`{i}.` [{title}]({url}) "
+                    f"({duration})\n"
+                )
+            else:
+                line = (
+                    f"`{i}.` {title} "
+                    f"({duration})\n"
+                )
+
+            if len(queue_text) + len(line) > 900:
+                break
+
+            queue_text += line
+            shown += 1
+
+        if queue_text:
+            remaining = len(queue_items) - shown
+
+            if remaining > 0:
+                suffix = f"... and {remaining} more"
+
+                if len(queue_text) + len(suffix) <= 1000:
+                    queue_text += suffix
+
+            embed.add_field(
+                name="📜 Up Next",
+                value=queue_text[:1024],
+                inline=False,
+            )
+
+        embed.set_footer(
+            text=f"Loop: {loop_mode} | "
+            f"Shuffle: {'ON' if shuffle_enabled else 'OFF'}"
+        )
+
+        await interaction.followup.send(embed=embed)
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /queue Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+    except Exception as exc:
+        print(
+            f"❌ /queue failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.followup.send(
+                "❌ Failed to display the queue. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+
 
 # ===== 11. NOWPLAYING =====
 @bot.tree.command(name='nowplaying', description='🎶 Show currently playing song')
