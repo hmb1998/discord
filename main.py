@@ -273,6 +273,9 @@ ANTI_RAID_LOCKDOWN_SECONDS = int(
 )
 ANTI_RAID_COOLDOWN = float(os.getenv("ANTI_RAID_COOLDOWN", "30"))
 
+# V12.4: Maximum number of waiting songs added through /play.
+MAX_PLAY_QUEUE = int(os.getenv("MAX_PLAY_QUEUE", "100"))
+
 # Security V3: suspicious account detection.
 SECURITY_MIN_ACCOUNT_AGE_DAYS = int(
     os.getenv("SECURITY_MIN_ACCOUNT_AGE_DAYS", "7")
@@ -2752,6 +2755,24 @@ async def unlockdown(interaction: discord.Interaction):
 async def play(interaction: discord.Interaction, query: str):
     """Play a song safely without double-acknowledging Discord."""
 
+    # V12.1: Validate user input before touching voice/YouTube.
+    query = (query or "").strip()
+
+    if not query:
+        await interaction.response.send_message(
+            "❌ Please provide a song name or YouTube URL.",
+            ephemeral=True,
+        )
+        return
+
+    # Prevent excessively large input from reaching yt-dlp.
+    if len(query) > 200:
+        await interaction.response.send_message(
+            "❌ Search query is too long. Maximum: 200 characters.",
+            ephemeral=True,
+        )
+        return
+
     message = None
 
     # First response must happen only once.
@@ -2809,19 +2830,44 @@ async def play(interaction: discord.Interaction, query: str):
         )
         return
 
-    if guild_id not in bot.queues:
-        bot.queues[guild_id] = []
+    # V12.2/V12.3: Serialize queue mutations and prevent duplicates.
+    # The YouTube video ID is the stable identity for a queued song.
+    async with _get_playback_lock(guild_id):
+        if guild_id not in bot.queues:
+            bot.queues[guild_id] = []
 
-    bot.queues[guild_id].append(song)
+        video_id = song.get("id")
 
-    if not vc.is_playing():
+        if video_id and any(
+            queued.get("id") == video_id
+            for queued in bot.queues[guild_id]
+        ):
+            await interaction.followup.send(
+                f"⚠️ **Already in queue:** "
+                f"[{song['title']}]({song['url']})",
+                ephemeral=True,
+            )
+            return
+
+        if len(bot.queues[guild_id]) >= MAX_PLAY_QUEUE:
+            await interaction.followup.send(
+                f"❌ Queue limit reached. Maximum: `{MAX_PLAY_QUEUE}` songs.",
+                ephemeral=True,
+            )
+            return
+
+        bot.queues[guild_id].append(song)
+        queue_position = len(bot.queues[guild_id])
+        is_playing = vc.is_playing()
+
+    if not is_playing:
         await interaction.followup.send(
             f"▶️ **Now Playing:** [{song['title']}]({song['url']}) "
             f"(`{format_time(song['duration'])}`)"
         )
         await play_next(guild_id)
     else:
-        position = len(bot.queues[guild_id])
+        position = queue_position
         await interaction.followup.send(
             f"✅ **Added to Queue** (#{position}): "
             f"[{song['title']}]({song['url']}) "
