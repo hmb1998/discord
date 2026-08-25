@@ -286,6 +286,21 @@ ANTI_NUKE_CHANNEL_DELETE_LIMIT = int(
 ANTI_NUKE_ROLE_DELETE_LIMIT = int(
     os.getenv("ANTI_NUKE_ROLE_DELETE_LIMIT", "3")
 )
+ANTI_NUKE_CHANNEL_CREATE_LIMIT = int(
+    os.getenv("ANTI_NUKE_CHANNEL_CREATE_LIMIT", "3")
+)
+ANTI_NUKE_CHANNEL_UPDATE_LIMIT = int(
+    os.getenv("ANTI_NUKE_CHANNEL_UPDATE_LIMIT", "3")
+)
+ANTI_NUKE_ROLE_CREATE_LIMIT = int(
+    os.getenv("ANTI_NUKE_ROLE_CREATE_LIMIT", "3")
+)
+ANTI_NUKE_ROLE_UPDATE_LIMIT = int(
+    os.getenv("ANTI_NUKE_ROLE_UPDATE_LIMIT", "3")
+)
+ANTI_NUKE_WEBHOOK_LIMIT = int(
+    os.getenv("ANTI_NUKE_WEBHOOK_LIMIT", "3")
+)
 ANTI_NUKE_COOLDOWN = float(os.getenv("ANTI_NUKE_COOLDOWN", "60"))
 
 _anti_nuke_events = {}
@@ -478,100 +493,220 @@ async def on_guild_role_delete(role):
     )
 
 
-async def _anti_raid_lockdown(guild):
-    now = time.monotonic()
-    current = _raid_lockdown_until.get(guild.id, 0)
+@bot.event
+async def on_guild_channel_create(channel):
+    guild = channel.guild
 
-    if current > now:
-        return False
-
-    me = guild.me
-    if not me or not me.guild_permissions.manage_channels:
-        await _send_security_log(
-            guild,
-            "⚠️ **Anti-Raid detected**, but I do not have "
-            "`Manage Channels` permission."
-        )
-        return False
-
-    _raid_lockdown_until[guild.id] = (
-        now + ANTI_RAID_LOCKDOWN_SECONDS
+    actor = await _anti_nuke_audit_actor(
+        guild,
+        discord.AuditLogAction.channel_create,
+        channel.id,
     )
 
-    saved = _raid_lockdown_overwrites.setdefault(guild.id, {})
+    actor_name = getattr(actor, "display_name", "Unknown")
 
-    locked = 0
+    if _anti_nuke_actor_is_trusted(guild, actor):
+        count = 0
+    else:
+        count = _anti_nuke_record(
+            guild.id,
+            "channel_create",
+        )
 
-    for channel in guild.text_channels:
-        try:
-            overwrite = channel.overwrites_for(guild.default_role)
-
-            if channel.id not in saved:
-                saved[channel.id] = overwrite
-
-            overwrite.send_messages = False
-
-            await channel.set_permissions(
-                guild.default_role,
-                overwrite=overwrite,
-                reason="HMB Anti-Raid automatic lockdown",
-            )
-
-            bot.lockdown_channels.add(channel.id)
-            locked += 1
-
-        except (discord.Forbidden, discord.HTTPException):
-            continue
+    await _anti_nuke_check(
+        guild,
+        "channel_create",
+        count,
+        ANTI_NUKE_CHANNEL_CREATE_LIMIT,
+        channel.name,
+        actor=actor,
+    )
 
     await _send_security_log(
         guild,
-        f"🚨 **ANTI-RAID LOCKDOWN** | "
-        f"Join spike: `{ANTI_RAID_JOIN_LIMIT}+` joins/"
-        f"`{ANTI_RAID_WINDOW:g}s` | "
-        f"Locked channels: `{locked}` | "
-        f"Duration: `{ANTI_RAID_LOCKDOWN_SECONDS // 60}m`"
+        f"📁 Channel created: `{channel.name}` | "
+        f"Actor: `{actor_name}`"
     )
 
-    async def auto_unlock():
-        await asyncio.sleep(ANTI_RAID_LOCKDOWN_SECONDS)
 
-        if _raid_lockdown_until.get(guild.id, 0) > time.monotonic():
-            return
+@bot.event
+async def on_guild_channel_update(before, after):
+    guild = after.guild
 
-        overwrites = _raid_lockdown_overwrites.pop(
+    actor = await _anti_nuke_audit_actor(
+        guild,
+        discord.AuditLogAction.channel_update,
+        after.id,
+    )
+
+    actor_name = getattr(actor, "display_name", "Unknown")
+
+    if _anti_nuke_actor_is_trusted(guild, actor):
+        count = 0
+    else:
+        count = _anti_nuke_record(
             guild.id,
-            {},
+            "channel_update",
         )
 
-        restored = 0
+    await _anti_nuke_check(
+        guild,
+        "channel_update",
+        count,
+        ANTI_NUKE_CHANNEL_UPDATE_LIMIT,
+        after.name,
+        actor=actor,
+    )
 
-        for channel_id, overwrite in overwrites.items():
-            channel = guild.get_channel(channel_id)
 
-            if not channel:
-                continue
+@bot.event
+async def on_guild_role_create(role):
+    guild = role.guild
 
-            try:
-                await channel.set_permissions(
-                    guild.default_role,
-                    overwrite=overwrite,
-                    reason="HMB Anti-Raid automatic unlock",
+    actor = await _anti_nuke_audit_actor(
+        guild,
+        discord.AuditLogAction.role_create,
+        role.id,
+    )
+
+    actor_name = getattr(actor, "display_name", "Unknown")
+
+    if _anti_nuke_actor_is_trusted(guild, actor):
+        count = 0
+    else:
+        count = _anti_nuke_record(
+            guild.id,
+            "role_create",
+        )
+
+    await _anti_nuke_check(
+        guild,
+        "role_create",
+        count,
+        ANTI_NUKE_ROLE_CREATE_LIMIT,
+        role.name,
+        actor=actor,
+    )
+
+    await _send_security_log(
+        guild,
+        f"🎭 Role created: `{role.name}` | "
+        f"Actor: `{actor_name}`"
+    )
+
+
+@bot.event
+async def on_guild_role_update(before, after):
+    guild = after.guild
+
+    actor = await _anti_nuke_audit_actor(
+        guild,
+        discord.AuditLogAction.role_update,
+        after.id,
+    )
+
+    actor_name = getattr(actor, "display_name", "Unknown")
+
+    if _anti_nuke_actor_is_trusted(guild, actor):
+        count = 0
+    else:
+        count = _anti_nuke_record(
+            guild.id,
+            "role_update",
+        )
+
+    await _anti_nuke_check(
+        guild,
+        "role_update",
+        count,
+        ANTI_NUKE_ROLE_UPDATE_LIMIT,
+        after.name,
+        actor=actor,
+    )
+
+
+@bot.event
+async def on_webhooks_update(channel):
+    guild = channel.guild
+
+    try:
+        actions = (
+            discord.AuditLogAction.webhook_create,
+            discord.AuditLogAction.webhook_update,
+            discord.AuditLogAction.webhook_delete,
+        )
+
+        recent_entries = []
+
+        for action in actions:
+            async for entry in guild.audit_logs(
+                limit=10,
+                action=action,
+            ):
+                age = (
+                    discord.utils.utcnow() - entry.created_at
+                ).total_seconds()
+
+                if age < 0 or age > 10:
+                    continue
+
+                entry_channel = getattr(entry, "target", None)
+                entry_channel_id = getattr(
+                    entry_channel,
+                    "channel_id",
+                    None,
                 )
-                bot.lockdown_channels.discard(channel.id)
-                restored += 1
-            except (discord.Forbidden, discord.HTTPException):
-                continue
 
-        _raid_lockdown_until.pop(guild.id, None)
+                # Only accept entries associated with this channel
+                # when Discord exposes the channel relationship.
+                if (
+                    entry_channel_id is not None
+                    and entry_channel_id != channel.id
+                ):
+                    continue
+
+                recent_entries.append(entry)
+
+        if not recent_entries:
+            return
+
+        # Newest matching Audit Log entry first.
+        recent_entries.sort(
+            key=lambda entry: entry.created_at,
+            reverse=True,
+        )
+
+        entry = recent_entries[0]
+        actor = entry.user
+        actor_name = getattr(actor, "display_name", "Unknown")
+        action_name = str(entry.action).split(".")[-1]
+
+        if _anti_nuke_actor_is_trusted(guild, actor):
+            count = 0
+        else:
+            count = _anti_nuke_record(
+                guild.id,
+                "webhook",
+            )
+
+        await _anti_nuke_check(
+            guild,
+            "webhook",
+            count,
+            ANTI_NUKE_WEBHOOK_LIMIT,
+            getattr(channel, "name", "unknown channel"),
+            actor=actor,
+        )
 
         await _send_security_log(
             guild,
-            f"🔓 **ANTI-RAID AUTO-UNLOCK** | "
-            f"Restored channels: `{restored}`"
+            f"🔗 Webhook `{action_name}` | "
+            f"Channel: `{getattr(channel, 'name', 'unknown')}` | "
+            f"Actor: `{actor_name}`"
         )
 
-    asyncio.create_task(auto_unlock())
-    return True
+    except (discord.Forbidden, discord.HTTPException):
+        return
 
 
 @bot.event
