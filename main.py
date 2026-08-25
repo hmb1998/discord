@@ -2842,6 +2842,19 @@ async def play(interaction: discord.Interaction, query: str):
         )
         return
 
+    # V12.6: Validate the YouTube result before touching the queue.
+    required_song_fields = ("id", "url", "title", "audio_url")
+
+    if any(
+        not isinstance(song.get(field), str) or not song.get(field).strip()
+        for field in required_song_fields
+    ):
+        await interaction.followup.send(
+            "❌ Invalid YouTube result. Please try another search.",
+            ephemeral=True,
+        )
+        return
+
     # V12.2/V12.3: Serialize queue mutations and prevent duplicates.
     # The YouTube video ID is the stable identity for a queued song.
     async with _get_playback_lock(guild_id):
