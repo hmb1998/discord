@@ -3019,13 +3019,57 @@ async def playtop(interaction: discord.Interaction, query: str):
 # ===== 3. PAUSE =====
 @bot.tree.command(name='pause', description='⏸ Pause the current song')
 async def pause(interaction: discord.Interaction):
+    """Pause the current song safely."""
+
+    # V14.1: Validate guild and voice state before pausing.
     guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
     vc = get_vc(guild_id)
-    if vc and vc.is_playing():
+
+    if not vc or not vc.is_connected():
+        await interaction.response.send_message(
+            "❌ I am not connected to a voice channel.",
+            ephemeral=True,
+        )
+        return
+
+    if vc.is_paused():
+        await interaction.response.send_message(
+            "⏸️ The current song is already paused.",
+            ephemeral=True,
+        )
+        return
+
+    if not vc.is_playing():
+        await interaction.response.send_message(
+            "❌ Nothing is currently playing.",
+            ephemeral=True,
+        )
+        return
+
+    try:
         vc.pause()
-        await interaction.response.send_message("⏸ **Paused** ⏸")
-    else:
-        await interaction.response.send_message("❌ Nothing is playing", ephemeral=True)
+    except (discord.ClientException, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /pause failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        await interaction.response.send_message(
+            "❌ Failed to pause the current song. Please try again.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.send_message(
+        "⏸️ **Paused**"
+    )
 
 # ===== 4. RESUME =====
 @bot.tree.command(name='resume', description='▶️ Resume playback')
