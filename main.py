@@ -273,6 +273,11 @@ ANTI_RAID_LOCKDOWN_SECONDS = int(
 )
 ANTI_RAID_COOLDOWN = float(os.getenv("ANTI_RAID_COOLDOWN", "30"))
 
+# Security V3: suspicious account detection.
+SECURITY_MIN_ACCOUNT_AGE_DAYS = int(
+    os.getenv("SECURITY_MIN_ACCOUNT_AGE_DAYS", "7")
+)
+
 _raid_join_events = {}
 _raid_lockdown_until = {}
 _raid_last_trigger = {}
@@ -377,10 +382,32 @@ async def _anti_raid_lockdown(guild):
 
 @bot.event
 async def on_member_join(member):
+    guild = member.guild
+
+    # Security V3: inspect the account before Anti-Raid processing.
+    account_age = (
+        discord.utils.utcnow() - member.created_at
+    ).total_seconds()
+
+    min_age = SECURITY_MIN_ACCOUNT_AGE_DAYS * 86400
+    suspicious_age = account_age < min_age
+
     if member.bot:
+        await _send_security_log(
+            guild,
+            f"🤖 **Bot joined** | {member.mention} | "
+            f"Account age: `{account_age / 86400:.1f} days`"
+        )
         return
 
-    guild = member.guild
+    if suspicious_age:
+        await _send_security_log(
+            guild,
+            f"⚠️ **Suspicious new account** | {member.mention} | "
+            f"Account age: `{account_age / 86400:.1f} days` | "
+            f"Threshold: `{SECURITY_MIN_ACCOUNT_AGE_DAYS} days`"
+        )
+
     now = time.monotonic()
 
     events = _raid_join_events.setdefault(guild.id, deque())
