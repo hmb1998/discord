@@ -307,6 +307,9 @@ ANTI_NUKE_BAN_LIMIT = int(
 ANTI_NUKE_KICK_LIMIT = int(
     os.getenv("ANTI_NUKE_KICK_LIMIT", "3")
 )
+ANTI_NUKE_OVERWRITE_LIMIT = int(
+    os.getenv("ANTI_NUKE_OVERWRITE_LIMIT", "5")
+)
 ANTI_NUKE_MEMBER_ROLE_LIMIT = int(
     os.getenv("ANTI_NUKE_MEMBER_ROLE_LIMIT", "5")
 )
@@ -454,6 +457,93 @@ async def _anti_nuke_audit_count_recent(guild, action):
         return 0
 
     return count
+
+
+async def _anti_nuke_process_overwrite(guild, channel):
+    """Process recent permission-overwrite Audit Log activity."""
+    actions = (
+        discord.AuditLogAction.overwrite_create,
+        discord.AuditLogAction.overwrite_update,
+        discord.AuditLogAction.overwrite_delete,
+    )
+
+    recent_entries = []
+    now = discord.utils.utcnow()
+
+    try:
+        for action in actions:
+            async for entry in guild.audit_logs(
+                limit=20,
+                action=action,
+            ):
+                age = (now - entry.created_at).total_seconds()
+
+                if age < 0:
+                    continue
+
+                if age > ANTI_NUKE_WINDOW:
+                    break
+
+                target = getattr(entry, "target", None)
+                target_channel = getattr(target, "channel", None)
+
+                # Do not count an entry when Discord cannot associate
+                # it with this channel.
+                if target_channel is None:
+                    continue
+
+                if getattr(target_channel, "id", None) != channel.id:
+                    continue
+
+                recent_entries.append(entry)
+
+        if not recent_entries:
+            return False
+
+        recent_entries.sort(
+            key=lambda entry: entry.created_at,
+            reverse=True,
+        )
+
+        latest_entry = recent_entries[0]
+        actor = latest_entry.user
+
+        if _anti_nuke_actor_is_trusted(guild, actor):
+            await _anti_nuke_check(
+                guild,
+                "permission_overwrite",
+                0,
+                ANTI_NUKE_OVERWRITE_LIMIT,
+                getattr(channel, "name", "unknown channel"),
+                actor=actor,
+            )
+            return False
+
+        # All overwrite actions share one Anti-Nuke counter.
+        count = len(recent_entries)
+
+        _anti_nuke_events[
+            (guild.id, "permission_overwrite")
+        ] = deque(
+            [
+                time.monotonic() - i
+                for i in range(count)
+            ]
+        )
+
+        return await _anti_nuke_check(
+            guild,
+            "permission_overwrite",
+            count,
+            ANTI_NUKE_OVERWRITE_LIMIT,
+            getattr(channel, "name", "unknown channel"),
+            actor=actor,
+        )
+
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+
+    return False
 
 
 async def _anti_nuke_process_audit_action(
@@ -677,6 +767,11 @@ async def on_guild_channel_update(before, after):
     )
 
     actor_name = getattr(actor, "display_name", "Unknown")
+
+    # V11: permission overwrite protection.
+    # Process overwrite audit activity only when channel overwrites changed.
+    if before.overwrites != after.overwrites:
+        await _anti_nuke_process_overwrite(guild, after)
 
     if _anti_nuke_actor_is_trusted(guild, actor):
         count = 0
