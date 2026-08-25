@@ -3130,24 +3130,42 @@ async def resume(interaction: discord.Interaction):
 @bot.tree.command(name='skip', description='Skip the current song')
 @app_commands.describe(count='Number of songs to skip (default: 1)')
 async def skip(interaction: discord.Interaction, count: Optional[int] = 1):
+    """Skip the current song safely."""
+
+    # V16.1: Validate guild and skip count before touching playback.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        count = int(count or 1)
+    except (TypeError, ValueError):
+        count = 1
+
+    count = max(1, count)
+
     try:
         await interaction.response.defer()
-
-        guild_id = interaction.guild_id
-        count = max(1, count or 1)
 
         async with _get_playback_lock(guild_id):
             vc = get_vc(guild_id)
 
             if not vc or not vc.is_connected():
                 await interaction.followup.send(
-                    "❌ Nothing is playing."
+                    "❌ I am not connected to a voice channel.",
+                    ephemeral=True,
                 )
                 return
 
             if not vc.is_playing() and not vc.is_paused():
                 await interaction.followup.send(
-                    "❌ Nothing is playing."
+                    "❌ Nothing is currently playing.",
+                    ephemeral=True,
                 )
                 return
 
@@ -3156,35 +3174,53 @@ async def skip(interaction: discord.Interaction, count: Optional[int] = 1):
             # Current song counts as the first skipped song.
             skipped = min(count, len(queue) + 1)
 
-            # Remove additional queued songs that are being skipped.
+            # Remove additional queued songs being skipped.
             for _ in range(max(0, skipped - 1)):
                 if queue:
                     queue.pop(0)
 
             # Invalidate the current playback callback BEFORE stopping.
-            bot.playback_generation[guild_id] += 1
+            bot.playback_generation[guild_id] = (
+                bot.playback_generation.get(guild_id, 0) + 1
+            )
 
-            if vc.is_playing() or vc.is_paused():
-                vc.stop()
+            try:
+                if vc.is_playing() or vc.is_paused():
+                    vc.stop()
+            except (discord.ClientException, discord.HTTPException) as exc:
+                print(
+                    f"⚠️ /skip stop failed in guild {guild_id}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                await interaction.followup.send(
+                    "❌ Failed to stop the current song. Please try again.",
+                    ephemeral=True,
+                )
+                return
 
         await interaction.followup.send(
             f"⏭️ **Skipped {skipped} "
             f"song{'s' if skipped != 1 else ''}.**"
         )
 
-        # Start the replacement outside the lock.
-        # The old callback is invalidated by generation.
+        # Start replacement outside the playback lock.
         asyncio.create_task(play_next(guild_id))
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /skip Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
 
     except Exception as exc:
         print(
-            f"❌ SKIP ERROR: "
+            f"❌ /skip failed in guild {guild_id}: "
             f"{type(exc).__name__}: {exc}"
         )
 
         try:
             await interaction.followup.send(
-                "❌ Skip failed. Check bot logs.",
+                "❌ Skip failed. Please try again.",
                 ephemeral=True,
             )
         except Exception:
