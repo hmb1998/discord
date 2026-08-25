@@ -2355,6 +2355,36 @@ async def song_autocomplete(interaction: discord.Interaction, current: str):
 def _require_staff(interaction):
     return _is_staff(interaction.user)
 
+def _security_health_check(guild):
+    """Return read-only health status for the security subsystem."""
+    settings = security_settings(guild.id)
+
+    checks = {
+        "settings": isinstance(settings, dict),
+        "anti_nuke": all((
+            ANTI_NUKE_WINDOW > 0,
+            ANTI_NUKE_COOLDOWN > 0,
+            ANTI_NUKE_CHANNEL_DELETE_LIMIT > 0,
+            ANTI_NUKE_ROLE_DELETE_LIMIT > 0,
+            ANTI_NUKE_BAN_LIMIT > 0,
+            ANTI_NUKE_KICK_LIMIT > 0,
+        )),
+        "anti_raid": all((
+            ANTI_RAID_JOIN_LIMIT > 0,
+            ANTI_RAID_WINDOW > 0,
+            ANTI_RAID_LOCKDOWN_SECONDS > 0,
+            ANTI_RAID_COOLDOWN > 0,
+        )),
+        "security_log": (
+            settings.get("log_channel_id") is None
+            or isinstance(settings.get("log_channel_id"), int)
+        ),
+    }
+
+    checks["overall"] = all(checks.values())
+    return checks
+
+
 def _security_dashboard_stats(guild):
     """Return read-only live security statistics for a guild."""
     guild_id = guild.id
@@ -2430,6 +2460,13 @@ async def security(
 
     if action_name == "dashboard":
         stats = _security_dashboard_stats(interaction.guild)
+        health = _security_health_check(interaction.guild)
+
+        health_status = (
+            "🟢 HEALTHY"
+            if health["overall"]
+            else "🔴 WARNING"
+        )
 
         lockdown = (
             "🔴 ACTIVE"
@@ -2439,11 +2476,16 @@ async def security(
 
         await interaction.response.send_message(
             "📊 **HMB Security Dashboard**\n"
+            f"🏥 Security health: `{health_status}`\n"
             f"🛡️ Anti-Spam violations: `{stats['spam_violations']}`\n"
             f"🚨 Anti-Nuke events: `{stats['anti_nuke_events']}`\n"
             f"⚔️ Raid join events: `{stats['raid_events']}`\n"
             f"🔒 Locked channels: `{stats['locked_channels']}`\n"
-            f"🚨 Raid lockdown: `{lockdown}`",
+            f"🚨 Raid lockdown: `{lockdown}`\n"
+            f"⚙️ Settings: `{'OK' if health['settings'] else 'WARN'}`\n"
+            f"🛡️ Anti-Nuke: `{'OK' if health['anti_nuke'] else 'WARN'}`\n"
+            f"⚔️ Anti-Raid: `{'OK' if health['anti_raid'] else 'WARN'}`\n"
+            f"📋 Security log: `{'OK' if health['security_log'] else 'WARN'}`",
             ephemeral=True,
         )
         return
