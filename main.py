@@ -2903,31 +2903,118 @@ async def play(interaction: discord.Interaction, query: str):
 @bot.tree.command(name='playtop', description='🎵 Add a song to the top of the queue')
 @app_commands.describe(query='Song name or YouTube URL')
 async def playtop(interaction: discord.Interaction, query: str):
+    """Add a song to the top of the queue safely."""
+
+    # V13.1: Validate user input before touching voice/YouTube.
+    query = (query or "").strip()
+
+    if not query:
+        await interaction.response.send_message(
+            "❌ Please provide a song name or YouTube URL.",
+            ephemeral=True,
+        )
+        return
+
+    if len(query) > 200:
+        await interaction.response.send_message(
+            "❌ Search query is too long. Maximum: 200 characters.",
+            ephemeral=True,
+        )
+        return
+
     await interaction.response.defer()
+
     if not await voice_check(interaction):
         return
-    
+
     vc, _ = await get_voice_client(interaction)
     if not vc:
         return
-    
+
     guild_id = interaction.guild_id
-    song = await asyncio.to_thread(search_youtube, query)
-    
-    if 'error' in song:
-        await interaction.followup.send(f"❌ {song['error']}", ephemeral=True)
+
+    try:
+        # V13.1: Bound the complete YouTube search operation.
+        song = await asyncio.wait_for(
+            asyncio.to_thread(search_youtube, query),
+            timeout=PLAY_SEARCH_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        await interaction.followup.send(
+            "⏱️ YouTube search timed out. Please try again.",
+            ephemeral=True,
+        )
         return
-    
-    if guild_id not in bot.queues:
-        bot.queues[guild_id] = []
-    
-    bot.queues[guild_id].insert(0, song)
-    
-    if not vc.is_playing():
-        await interaction.followup.send(f"▶️ **Now Playing:** [{song['title']}]({song['url']})")
+    except Exception as exc:
+        await interaction.followup.send(
+            f"❌ YouTube search failed: "
+            f"{type(exc).__name__}: {str(exc)[:150]}",
+            ephemeral=True,
+        )
+        return
+
+    if 'error' in song:
+        await interaction.followup.send(
+            f"❌ {song['error']}",
+            ephemeral=True,
+        )
+        return
+
+    # V13.2: Validate the YouTube result before touching the queue.
+    required_song_fields = ("id", "url", "title", "audio_url")
+
+    if any(
+        not isinstance(song.get(field), str) or not song.get(field).strip()
+        for field in required_song_fields
+    ):
+        await interaction.followup.send(
+            "❌ Invalid YouTube result. Please try another search.",
+            ephemeral=True,
+        )
+        return
+
+    # V13.2: Serialize queue mutations, prevent duplicates,
+    # and enforce the global waiting-queue limit.
+    async with _get_playback_lock(guild_id):
+        if guild_id not in bot.queues:
+            bot.queues[guild_id] = []
+
+        video_id = song.get("id")
+
+        if video_id and any(
+            queued.get("id") == video_id
+            for queued in bot.queues[guild_id]
+        ):
+            await interaction.followup.send(
+                f"⚠️ **Already in queue:** "
+                f"[{song['title']}]({song['url']})",
+                ephemeral=True,
+            )
+            return
+
+        if len(bot.queues[guild_id]) >= MAX_PLAY_QUEUE:
+            await interaction.followup.send(
+                f"❌ Queue limit reached. Maximum: "
+                f"`{MAX_PLAY_QUEUE}` songs.",
+                ephemeral=True,
+            )
+            return
+
+        bot.queues[guild_id].insert(0, song)
+        queue_position = 1
+        is_playing = vc.is_playing()
+
+    if not is_playing:
+        await interaction.followup.send(
+            f"▶️ **Now Playing:** [{song['title']}]({song['url']})"
+        )
         await play_next(guild_id)
     else:
-        await interaction.followup.send(f"⬆️ **Added to Top of Queue:** [{song['title']}]({song['url']})")
+        await interaction.followup.send(
+            f"⬆️ **Added to Top of Queue:** "
+            f"[{song['title']}]({song['url']}) "
+            f"(Position #{queue_position})"
+        )
 
 # ===== 3. PAUSE =====
 @bot.tree.command(name='pause', description='⏸ Pause the current song')
