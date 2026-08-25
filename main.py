@@ -301,6 +301,15 @@ ANTI_NUKE_ROLE_UPDATE_LIMIT = int(
 ANTI_NUKE_WEBHOOK_LIMIT = int(
     os.getenv("ANTI_NUKE_WEBHOOK_LIMIT", "3")
 )
+ANTI_NUKE_BAN_LIMIT = int(
+    os.getenv("ANTI_NUKE_BAN_LIMIT", "3")
+)
+ANTI_NUKE_KICK_LIMIT = int(
+    os.getenv("ANTI_NUKE_KICK_LIMIT", "3")
+)
+ANTI_NUKE_MEMBER_ROLE_LIMIT = int(
+    os.getenv("ANTI_NUKE_MEMBER_ROLE_LIMIT", "5")
+)
 ANTI_NUKE_COOLDOWN = float(os.getenv("ANTI_NUKE_COOLDOWN", "60"))
 
 _anti_nuke_events = {}
@@ -419,6 +428,134 @@ async def _anti_nuke_audit_actor(guild, action, target_id):
         return None
 
     return None
+
+
+async def _anti_nuke_audit_count_recent(guild, action):
+    """Count recent audit-log actions for a specific action."""
+    count = 0
+    now = discord.utils.utcnow()
+
+    try:
+        async for entry in guild.audit_logs(
+            limit=20,
+            action=action,
+        ):
+            age = (now - entry.created_at).total_seconds()
+
+            if age < 0:
+                continue
+
+            if age > ANTI_NUKE_WINDOW:
+                break
+
+            count += 1
+
+    except (discord.Forbidden, discord.HTTPException):
+        return 0
+
+    return count
+
+
+async def _anti_nuke_process_audit_action(
+    guild,
+    action,
+    counter_name,
+    limit,
+    target_name,
+):
+    """Process recent Audit Log activity for Anti-Nuke V3."""
+    try:
+        async for entry in guild.audit_logs(
+            limit=1,
+            action=action,
+        ):
+            age = (
+                discord.utils.utcnow() - entry.created_at
+            ).total_seconds()
+
+            if age < 0 or age > 10:
+                return False
+
+            actor = entry.user
+
+            if _anti_nuke_actor_is_trusted(guild, actor):
+                await _anti_nuke_check(
+                    guild,
+                    counter_name,
+                    0,
+                    limit,
+                    target_name,
+                    actor=actor,
+                )
+                return False
+
+            count = await _anti_nuke_audit_count_recent(
+                guild,
+                action,
+            )
+
+            # Keep the local counter synchronized with Audit Log.
+            _anti_nuke_events[(guild.id, counter_name)] = deque(
+                [time.monotonic() - i for i in range(count)]
+            )
+
+            return await _anti_nuke_check(
+                guild,
+                counter_name,
+                count,
+                limit,
+                target_name,
+                actor=actor,
+            )
+
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+
+    return False
+
+
+@bot.event
+async def on_member_ban(guild, user):
+    await _anti_nuke_process_audit_action(
+        guild,
+        discord.AuditLogAction.ban,
+        "ban",
+        ANTI_NUKE_BAN_LIMIT,
+        getattr(user, "name", "unknown"),
+    )
+
+
+@bot.event
+async def on_member_remove(member):
+    # Discord emits member_remove for both voluntary leaves and kicks.
+    # Audit Log verification prevents normal leaves from counting as kicks.
+    guild = member.guild
+
+    await _anti_nuke_process_audit_action(
+        guild,
+        discord.AuditLogAction.kick,
+        "kick",
+        ANTI_NUKE_KICK_LIMIT,
+        getattr(member, "display_name", getattr(member, "name", "unknown")),
+    )
+
+
+@bot.event
+async def on_member_update(before, after):
+    # Role assignment/removal is checked through Audit Logs.
+    before_roles = {role.id for role in before.roles}
+    after_roles = {role.id for role in after.roles}
+
+    if before_roles == after_roles:
+        return
+
+    await _anti_nuke_process_audit_action(
+        after.guild,
+        discord.AuditLogAction.member_role_update,
+        "member_role_update",
+        ANTI_NUKE_MEMBER_ROLE_LIMIT,
+        getattr(after, "display_name", getattr(after, "name", "unknown")),
+    )
 
 
 @bot.event
