@@ -3230,52 +3230,76 @@ async def skip(interaction: discord.Interaction, count: Optional[int] = 1):
 # ===== 6. STOP =====
 @bot.tree.command(name='stop', description='⏹ Stop playback and clear queue')
 async def stop(interaction: discord.Interaction):
+    """Stop playback and clear the queue safely."""
+
+    # V17.1: Validate guild before touching playback.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
     try:
         await interaction.response.defer()
-
-        guild_id = interaction.guild_id
 
         async with _get_playback_lock(guild_id):
             vc = get_vc(guild_id)
 
             # Invalidate every old playback callback first.
-            bot.playback_generation[guild_id] += 1
+            bot.playback_generation[guild_id] = (
+                bot.playback_generation.get(guild_id, 0) + 1
+            )
 
             # Completely clear playback state.
             bot.queues[guild_id] = []
             bot.now_playing.pop(guild_id, None)
 
             if vc and vc.is_connected():
-                if vc.is_playing() or vc.is_paused():
-                    vc.stop()
+                try:
+                    if vc.is_playing() or vc.is_paused():
+                        vc.stop()
+                except (discord.ClientException, discord.HTTPException) as exc:
+                    print(
+                        f"⚠️ /stop playback stop failed in guild {guild_id}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    await interaction.followup.send(
+                        "❌ Failed to stop the current playback.",
+                        ephemeral=True,
+                    )
+                    return
 
                 try:
                     await vc.disconnect()
-                except Exception as disconnect_error:
+                except (discord.ClientException, discord.HTTPException) as exc:
                     print(
-                        f"⚠️ Voice disconnect error: "
-                        f"{type(disconnect_error).__name__}: "
-                        f"{disconnect_error}"
+                        f"⚠️ /stop disconnect failed in guild {guild_id}: "
+                        f"{type(exc).__name__}: {exc}"
                     )
-
-                bot.custom_voice_clients.pop(
-                    guild_id,
-                    None,
-                )
+                    bot.custom_voice_clients.pop(guild_id, None)
 
         await interaction.followup.send(
-            "⏹ **Stopped & Disconnected** 👋"
+            "⏹️ **Playback stopped and queue cleared.**"
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /stop Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
         )
 
     except Exception as exc:
         print(
-            f"❌ STOP ERROR: "
+            f"❌ /stop failed in guild {guild_id}: "
             f"{type(exc).__name__}: {exc}"
         )
 
         try:
             await interaction.followup.send(
-                "❌ Stop failed. Check bot logs.",
+                "❌ Stop failed. Please try again.",
                 ephemeral=True,
             )
         except Exception:
