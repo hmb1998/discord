@@ -278,10 +278,204 @@ SECURITY_MIN_ACCOUNT_AGE_DAYS = int(
     os.getenv("SECURITY_MIN_ACCOUNT_AGE_DAYS", "7")
 )
 
+# Security V4: Anti-Nuke protection.
+ANTI_NUKE_WINDOW = float(os.getenv("ANTI_NUKE_WINDOW", "60"))
+ANTI_NUKE_CHANNEL_DELETE_LIMIT = int(
+    os.getenv("ANTI_NUKE_CHANNEL_DELETE_LIMIT", "3")
+)
+ANTI_NUKE_ROLE_DELETE_LIMIT = int(
+    os.getenv("ANTI_NUKE_ROLE_DELETE_LIMIT", "3")
+)
+ANTI_NUKE_COOLDOWN = float(os.getenv("ANTI_NUKE_COOLDOWN", "60"))
+
+_anti_nuke_events = {}
+_anti_nuke_last_trigger = {}
+
 _raid_join_events = {}
 _raid_lockdown_until = {}
 _raid_last_trigger = {}
 _raid_lockdown_overwrites = {}
+
+
+def _anti_nuke_record(guild_id, action):
+    """Record a destructive audit event and return the current count."""
+    key = (guild_id, action)
+    now = time.monotonic()
+
+    events = _anti_nuke_events.setdefault(key, deque())
+
+    while events and now - events[0] > ANTI_NUKE_WINDOW:
+        events.popleft()
+
+    events.append(now)
+    return len(events)
+
+
+def _anti_nuke_actor_is_trusted(guild, actor):
+    """Return True for the guild owner or trusted administrators."""
+    if actor is None:
+        return False
+
+    if actor.id == guild.owner_id:
+        return True
+
+    member = guild.get_member(actor.id)
+    if member is None:
+        return False
+
+    return bool(
+        member.guild_permissions.administrator
+        or member.guild_permissions.manage_guild
+    )
+
+
+async def _anti_nuke_check(
+    guild,
+    action,
+    count,
+    limit,
+    target_name,
+    actor=None,
+):
+    """Log a destructive event and trigger emergency lockdown at threshold."""
+
+    actor_name = getattr(actor, "display_name", "Unknown")
+
+    await _send_security_log(
+        guild,
+        f"🛡️ **ANTI-NUKE** | `{action}` | "
+        f"Target: `{target_name}` | "
+        f"Actor: `{actor_name}` | "
+        f"Count: `{count}/{limit}`"
+    )
+
+    # Trusted owner/admin actions are logged but never trigger Anti-Nuke.
+    if _anti_nuke_actor_is_trusted(guild, actor):
+        await _send_security_log(
+            guild,
+            f"✅ **ANTI-NUKE trusted actor** | "
+            f"`{actor_name}` performed `{action}` on `{target_name}`."
+        )
+        return False
+
+    if count < limit:
+        return False
+
+    now = time.monotonic()
+    last = _anti_nuke_last_trigger.get(guild.id, 0)
+
+    if now - last < ANTI_NUKE_COOLDOWN:
+        return False
+
+    _anti_nuke_last_trigger[guild.id] = now
+
+    await _send_security_log(
+        guild,
+        f"🚨 **ANTI-NUKE EMERGENCY** | "
+        f"`{action}` threshold reached: `{count}` events/"
+        f"`{ANTI_NUKE_WINDOW:g}s` | "
+        f"Emergency lockdown requested."
+    )
+
+    await _anti_raid_lockdown(guild)
+    return True
+
+
+async def _anti_nuke_audit_actor(guild, action, target_id):
+    """Find the recent Audit Log actor responsible for the target."""
+    try:
+        async for entry in guild.audit_logs(
+            limit=10,
+            action=action,
+        ):
+            target = entry.target
+
+            if getattr(target, "id", None) != target_id:
+                continue
+
+            age = (
+                discord.utils.utcnow() - entry.created_at
+            ).total_seconds()
+
+            if age <= 10:
+                return entry.user
+
+    except (discord.Forbidden, discord.HTTPException):
+        return None
+
+    return None
+
+
+@bot.event
+async def on_guild_channel_delete(channel):
+    guild = channel.guild
+
+    actor = await _anti_nuke_audit_actor(
+        guild,
+        discord.AuditLogAction.channel_delete,
+        channel.id,
+    )
+
+    actor_name = getattr(actor, "display_name", "Unknown")
+
+    if _anti_nuke_actor_is_trusted(guild, actor):
+        count = 0
+    else:
+        count = _anti_nuke_record(
+            guild.id,
+            "channel_delete",
+        )
+
+    await _anti_nuke_check(
+        guild,
+        "channel_delete",
+        count,
+        ANTI_NUKE_CHANNEL_DELETE_LIMIT,
+        channel.name,
+        actor=actor,
+    )
+
+    await _send_security_log(
+        guild,
+        f"🗑️ Channel deleted: `{channel.name}` | "
+        f"Actor: `{actor_name}`"
+    )
+
+
+@bot.event
+async def on_guild_role_delete(role):
+    guild = role.guild
+
+    actor = await _anti_nuke_audit_actor(
+        guild,
+        discord.AuditLogAction.role_delete,
+        role.id,
+    )
+
+    actor_name = getattr(actor, "display_name", "Unknown")
+
+    if _anti_nuke_actor_is_trusted(guild, actor):
+        count = 0
+    else:
+        count = _anti_nuke_record(
+            guild.id,
+            "role_delete",
+        )
+
+    await _anti_nuke_check(
+        guild,
+        "role_delete",
+        count,
+        ANTI_NUKE_ROLE_DELETE_LIMIT,
+        role.name,
+        actor=actor,
+    )
+
+    await _send_security_log(
+        guild,
+        f"🗑️ Role deleted: `{role.name}` | "
+        f"Actor: `{actor_name}`"
+    )
 
 
 async def _anti_raid_lockdown(guild):
