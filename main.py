@@ -263,6 +263,152 @@ async def on_ready():
 # ---------------------------------------------------------------------------
 # Professional moderation / security
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Anti-Raid / Join-Spike Protection V2
+# ---------------------------------------------------------------------------
+ANTI_RAID_JOIN_LIMIT = int(os.getenv("ANTI_RAID_JOIN_LIMIT", "10"))
+ANTI_RAID_WINDOW = float(os.getenv("ANTI_RAID_WINDOW", "10"))
+ANTI_RAID_LOCKDOWN_SECONDS = int(
+    os.getenv("ANTI_RAID_LOCKDOWN_SECONDS", "300")
+)
+ANTI_RAID_COOLDOWN = float(os.getenv("ANTI_RAID_COOLDOWN", "30"))
+
+_raid_join_events = {}
+_raid_lockdown_until = {}
+_raid_last_trigger = {}
+_raid_lockdown_overwrites = {}
+
+
+async def _anti_raid_lockdown(guild):
+    now = time.monotonic()
+    current = _raid_lockdown_until.get(guild.id, 0)
+
+    if current > now:
+        return False
+
+    me = guild.me
+    if not me or not me.guild_permissions.manage_channels:
+        await _send_security_log(
+            guild,
+            "⚠️ **Anti-Raid detected**, but I do not have "
+            "`Manage Channels` permission."
+        )
+        return False
+
+    _raid_lockdown_until[guild.id] = (
+        now + ANTI_RAID_LOCKDOWN_SECONDS
+    )
+
+    saved = _raid_lockdown_overwrites.setdefault(guild.id, {})
+
+    locked = 0
+
+    for channel in guild.text_channels:
+        try:
+            overwrite = channel.overwrites_for(guild.default_role)
+
+            if channel.id not in saved:
+                saved[channel.id] = overwrite
+
+            overwrite.send_messages = False
+
+            await channel.set_permissions(
+                guild.default_role,
+                overwrite=overwrite,
+                reason="HMB Anti-Raid automatic lockdown",
+            )
+
+            bot.lockdown_channels.add(channel.id)
+            locked += 1
+
+        except (discord.Forbidden, discord.HTTPException):
+            continue
+
+    await _send_security_log(
+        guild,
+        f"🚨 **ANTI-RAID LOCKDOWN** | "
+        f"Join spike: `{ANTI_RAID_JOIN_LIMIT}+` joins/"
+        f"`{ANTI_RAID_WINDOW:g}s` | "
+        f"Locked channels: `{locked}` | "
+        f"Duration: `{ANTI_RAID_LOCKDOWN_SECONDS // 60}m`"
+    )
+
+    async def auto_unlock():
+        await asyncio.sleep(ANTI_RAID_LOCKDOWN_SECONDS)
+
+        if _raid_lockdown_until.get(guild.id, 0) > time.monotonic():
+            return
+
+        overwrites = _raid_lockdown_overwrites.pop(
+            guild.id,
+            {},
+        )
+
+        restored = 0
+
+        for channel_id, overwrite in overwrites.items():
+            channel = guild.get_channel(channel_id)
+
+            if not channel:
+                continue
+
+            try:
+                await channel.set_permissions(
+                    guild.default_role,
+                    overwrite=overwrite,
+                    reason="HMB Anti-Raid automatic unlock",
+                )
+                bot.lockdown_channels.discard(channel.id)
+                restored += 1
+            except (discord.Forbidden, discord.HTTPException):
+                continue
+
+        _raid_lockdown_until.pop(guild.id, None)
+
+        await _send_security_log(
+            guild,
+            f"🔓 **ANTI-RAID AUTO-UNLOCK** | "
+            f"Restored channels: `{restored}`"
+        )
+
+    asyncio.create_task(auto_unlock())
+    return True
+
+
+@bot.event
+async def on_member_join(member):
+    if member.bot:
+        return
+
+    guild = member.guild
+    now = time.monotonic()
+
+    events = _raid_join_events.setdefault(guild.id, deque())
+
+    while events and now - events[0] > ANTI_RAID_WINDOW:
+        events.popleft()
+
+    events.append(now)
+
+    if len(events) < ANTI_RAID_JOIN_LIMIT:
+        return
+
+    # Clear the current burst so the same join wave does not
+    # repeatedly trigger lockdown.
+    events.clear()
+
+    # Cooldown: prevent repeated raid triggers from
+    # repeatedly starting lockdowns.
+    last_trigger = _raid_last_trigger.get(guild.id, 0)
+
+    if now - last_trigger < ANTI_RAID_COOLDOWN:
+        return
+
+    _raid_last_trigger[guild.id] = now
+
+    await _anti_raid_lockdown(guild)
+
+
 DEFAULT_SECURITY = {
     "spam_window": float(os.getenv("ANTISPAM_WINDOW", "5")),
     "spam_limit": int(os.getenv("ANTISPAM_MAX_MESSAGES", "5")),                 # 5 messages in 5 seconds => timeout
