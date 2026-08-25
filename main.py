@@ -2355,6 +2355,44 @@ async def song_autocomplete(interaction: discord.Interaction, current: str):
 def _require_staff(interaction):
     return _is_staff(interaction.user)
 
+def _security_dashboard_stats(guild):
+    """Return read-only live security statistics for a guild."""
+    guild_id = guild.id
+
+    spam_users = sum(
+        count
+        for (gid, _user_id), count in bot.spam_violations.items()
+        if gid == guild_id
+    )
+
+    anti_nuke_events = 0
+    for (gid, _action), events in _anti_nuke_events.items():
+        if gid != guild_id:
+            continue
+        anti_nuke_events += len(events)
+
+    raid_events = len(
+        _raid_join_events.get(guild_id, ())
+    )
+
+    locked_channels = sum(
+        1
+        for channel in guild.text_channels
+        if channel.id in bot.lockdown_channels
+    )
+
+    raid_lockdown_until = _raid_lockdown_until.get(guild_id, 0)
+    raid_lockdown_active = raid_lockdown_until > time.monotonic()
+
+    return {
+        "spam_violations": spam_users,
+        "anti_nuke_events": anti_nuke_events,
+        "raid_events": raid_events,
+        "locked_channels": locked_channels,
+        "raid_lockdown_active": raid_lockdown_active,
+    }
+
+
 @bot.tree.command(name="security", description="🛡️ Professional security control panel")
 @app_commands.describe(
     action="Control to view/change",
@@ -2371,6 +2409,7 @@ def _require_staff(interaction):
     app_commands.Choice(name="youtube", value="youtube"),
     app_commands.Choice(name="links", value="links"),
     app_commands.Choice(name="log", value="log"),
+    app_commands.Choice(name="dashboard", value="dashboard"),
 ])
 async def security(
     interaction: discord.Interaction,
@@ -2388,6 +2427,26 @@ async def security(
 
     s = security_settings(interaction.guild_id)
     action_name = action.value
+
+    if action_name == "dashboard":
+        stats = _security_dashboard_stats(interaction.guild)
+
+        lockdown = (
+            "🔴 ACTIVE"
+            if stats["raid_lockdown_active"]
+            else "🟢 INACTIVE"
+        )
+
+        await interaction.response.send_message(
+            "📊 **HMB Security Dashboard**\n"
+            f"🛡️ Anti-Spam violations: `{stats['spam_violations']}`\n"
+            f"🚨 Anti-Nuke events: `{stats['anti_nuke_events']}`\n"
+            f"⚔️ Raid join events: `{stats['raid_events']}`\n"
+            f"🔒 Locked channels: `{stats['locked_channels']}`\n"
+            f"🚨 Raid lockdown: `{lockdown}`",
+            ephemeral=True,
+        )
+        return
 
     if action_name == "status":
         await interaction.response.send_message(
