@@ -917,12 +917,80 @@ DEFAULT_SECURITY = {
     "log_channel_id": None,
 }
 
+def _validate_security_settings(settings):
+    """Normalize persisted security settings to safe supported values."""
+    if not isinstance(settings, dict):
+        settings = {}
+
+    defaults = DEFAULT_SECURITY
+
+    def _number(name, minimum, maximum, cast):
+        try:
+            value = cast(settings.get(name, defaults[name]))
+        except (TypeError, ValueError):
+            value = defaults[name]
+        return max(minimum, min(maximum, value))
+
+    settings["spam_window"] = _number("spam_window", 1.0, 60.0, float)
+    settings["spam_limit"] = _number("spam_limit", 1, 50, int)
+
+    settings["first_timeout"] = _number(
+        "first_timeout", 1, 24 * 60 * 60, int
+    )
+    settings["second_timeout"] = _number(
+        "second_timeout", 1, 24 * 60 * 60, int
+    )
+    settings["third_timeout"] = _number(
+        "third_timeout", 1, 24 * 60 * 60, int
+    )
+    settings["max_timeout"] = _number(
+        "max_timeout", 1, 24 * 60 * 60, int
+    )
+
+    settings["duplicate_limit"] = _number(
+        "duplicate_limit", 1, 20, int
+    )
+    settings["mention_limit"] = _number(
+        "mention_limit", 1, 20, int
+    )
+
+    settings["youtube_only"] = bool(settings.get(
+        "youtube_only",
+        defaults["youtube_only"],
+    ))
+    settings["delete_invites"] = bool(settings.get(
+        "delete_invites",
+        defaults["delete_invites"],
+    ))
+    settings["delete_external_links"] = bool(settings.get(
+        "delete_external_links",
+        defaults["delete_external_links"],
+    ))
+
+    log_channel_id = settings.get(
+        "log_channel_id",
+        defaults["log_channel_id"],
+    )
+    try:
+        log_channel_id = int(log_channel_id) if log_channel_id is not None else None
+        if log_channel_id is not None and log_channel_id <= 0:
+            log_channel_id = None
+    except (TypeError, ValueError):
+        log_channel_id = None
+
+    settings["log_channel_id"] = log_channel_id
+
+    return settings
+
+
 def security_settings(guild_id):
     settings = bot.security_settings.get(guild_id)
+
     if settings is None:
         settings = DEFAULT_SECURITY.copy()
         bot.security_settings[guild_id] = settings
-    return settings
+
+    return _validate_security_settings(settings)
 
 def _is_staff(member):
     return bool(
