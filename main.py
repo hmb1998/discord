@@ -3074,13 +3074,57 @@ async def pause(interaction: discord.Interaction):
 # ===== 4. RESUME =====
 @bot.tree.command(name='resume', description='▶️ Resume playback')
 async def resume(interaction: discord.Interaction):
+    """Resume paused playback safely."""
+
+    # V15.1: Validate guild and voice state before resuming.
     guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
     vc = get_vc(guild_id)
-    if vc and vc.is_paused():
+
+    if not vc or not vc.is_connected():
+        await interaction.response.send_message(
+            "❌ I am not connected to a voice channel.",
+            ephemeral=True,
+        )
+        return
+
+    if vc.is_playing():
+        await interaction.response.send_message(
+            "▶️ The current song is already playing.",
+            ephemeral=True,
+        )
+        return
+
+    if not vc.is_paused():
+        await interaction.response.send_message(
+            "❌ Nothing is currently paused.",
+            ephemeral=True,
+        )
+        return
+
+    try:
         vc.resume()
-        await interaction.response.send_message("▶️ **Resumed** ▶️")
-    else:
-        await interaction.response.send_message("❌ Nothing is paused", ephemeral=True)
+    except (discord.ClientException, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /resume failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        await interaction.response.send_message(
+            "❌ Failed to resume the current song. Please try again.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.send_message(
+        "▶️ **Resumed**"
+    )
 
 # ===== 5. SKIP =====
 @bot.tree.command(name='skip', description='Skip the current song')
