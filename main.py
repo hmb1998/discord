@@ -4062,14 +4062,70 @@ async def clear_queue(interaction: discord.Interaction):
 # ===== 14. SHUFFLE =====
 @bot.tree.command(name='shuffle', description='🔀 Toggle shuffle mode')
 async def shuffle(interaction: discord.Interaction):
+    """Toggle shuffle mode safely."""
+
+    # V25.1: Validate guild and update shuffle state under the playback lock.
     guild_id = interaction.guild_id
-    current = bot.shuffle_mode.get(guild_id, False)
-    bot.shuffle_mode[guild_id] = not current
-    
-    if bot.shuffle_mode.get(guild_id, False) and guild_id in bot.queues:
-        random.shuffle(bot.queues[guild_id])
-    
-    await interaction.response.send_message(f"🔀 **Shuffle:** {'ON' if bot.shuffle_mode[guild_id] else 'OFF'}")
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        async with _get_playback_lock(guild_id):
+            current = bool(bot.shuffle_mode.get(guild_id, False))
+            new_state = not current
+
+            bot.shuffle_mode[guild_id] = new_state
+
+            if new_state:
+                queue = bot.queues.get(guild_id)
+
+                if queue and len(queue) > 1:
+                    random.shuffle(queue)
+
+        state_text = "ON" if new_state else "OFF"
+
+        await interaction.response.send_message(
+            f"🔀 **Shuffle:** {state_text}"
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /shuffle Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to change shuffle mode. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to change shuffle mode. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /shuffle failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to change shuffle mode. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 # ===== 15. LOOP =====
 @bot.tree.command(name='loop', description='🔄 Set loop mode (none/song/queue)')
