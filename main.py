@@ -3991,13 +3991,73 @@ async def remove(interaction: discord.Interaction, position: int):
 # ===== 13. CLEAR =====
 @bot.tree.command(name='clear_queue', description='🧹 Clear the entire music queue')
 async def clear_queue(interaction: discord.Interaction):
+    """Clear the queued songs safely."""
+
+    # V24.1: Validate guild and clear queue under the playback lock.
     guild_id = interaction.guild_id
-    if guild_id in bot.queues:
-        count = len(bot.queues[guild_id])
-        bot.queues[guild_id] = []
-        await interaction.response.send_message(f"🧹 **Cleared** {count} songs from queue")
-    else:
-        await interaction.response.send_message("❌ Queue is already empty", ephemeral=True)
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        async with _get_playback_lock(guild_id):
+            queue = bot.queues.get(guild_id)
+
+            if not queue:
+                await interaction.response.send_message(
+                    "❌ Queue is already empty.",
+                    ephemeral=True,
+                )
+                return
+
+            count = len(queue)
+
+            # Replace the list instead of mutating it while another
+            # playback operation may hold a reference to the old list.
+            bot.queues[guild_id] = []
+
+        await interaction.response.send_message(
+            f"🧹 **Cleared {count} "
+            f"song{'s' if count != 1 else ''} from the queue.**"
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /clear_queue Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to clear the queue. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to clear the queue. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /clear_queue failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to clear the queue. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 # ===== 14. SHUFFLE =====
 @bot.tree.command(name='shuffle', description='🔀 Toggle shuffle mode')
