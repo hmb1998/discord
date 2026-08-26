@@ -3891,18 +3891,102 @@ async def nowplaying(
 @app_commands.describe(position='Position number in queue')
 @app_commands.autocomplete(position=song_autocomplete)
 async def remove(interaction: discord.Interaction, position: int):
+    """Remove one queued song safely."""
+
+    # V23.1: Validate guild, position, and queue state under the playback lock.
     guild_id = interaction.guild_id
-    if guild_id not in bot.queues or len(bot.queues[guild_id]) == 0:
-        await interaction.response.send_message("❌ Queue is empty", ephemeral=True)
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    
-    idx = position - 1
-    if idx < 0 or idx >= len(bot.queues[guild_id]):
-        await interaction.response.send_message(f"❌ Invalid position. Queue has {len(bot.queues[guild_id])} songs.", ephemeral=True)
+
+    try:
+        position = int(position)
+    except (TypeError, ValueError):
+        await interaction.response.send_message(
+            "❌ Position must be a valid number.",
+            ephemeral=True,
+        )
         return
-    
-    song = bot.queues[guild_id].pop(idx)
-    await interaction.response.send_message(f"🗑 **Removed:** {song['title']}")
+
+    if position < 1:
+        await interaction.response.send_message(
+            "❌ Position must be 1 or greater.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        async with _get_playback_lock(guild_id):
+            queue = bot.queues.get(guild_id, [])
+
+            if not queue:
+                await interaction.response.send_message(
+                    "❌ Queue is empty.",
+                    ephemeral=True,
+                )
+                return
+
+            index = position - 1
+
+            if index >= len(queue):
+                await interaction.response.send_message(
+                    f"❌ Invalid position. Queue has {len(queue)} songs.",
+                    ephemeral=True,
+                )
+                return
+
+            song = queue[index]
+
+            if not isinstance(song, dict):
+                removed_title = "Unknown Title"
+            else:
+                removed_title = str(
+                    song.get("title") or "Unknown Title"
+                ).replace("\n", " ")[:200]
+
+            removed = queue.pop(index)
+
+        await interaction.response.send_message(
+            f"🗑️ **Removed:** {removed_title}"
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /remove Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to remove the song. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to remove the song. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /remove failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to remove the song. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 # ===== 13. CLEAR =====
 @bot.tree.command(name='clear_queue', description='🧹 Clear the entire music queue')
