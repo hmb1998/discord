@@ -3396,14 +3396,92 @@ async def volume(interaction: discord.Interaction, percent: int):
 # ===== 8. VOLUME_UP =====
 @bot.tree.command(name='volumeup', description='🔊 Increase volume by 10%')
 async def volumeup(interaction: discord.Interaction):
+    """Increase playback volume safely."""
+
+    # V20.1: Validate guild, voice state, source, and volume bounds.
     guild_id = interaction.guild_id
-    vc = get_vc(guild_id)
-    if not vc or not vc.source or not hasattr(vc.source, 'volume'):
-        await interaction.response.send_message("❌ No active audio source", ephemeral=True)
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    new_vol = min(vc.source.volume + 0.10, 1.0)
-    vc.source.volume = new_vol
-    await interaction.response.send_message(f"🔊 **Volume:** {int(new_vol*100)}%")
+
+    try:
+        async with _get_playback_lock(guild_id):
+            vc = get_vc(guild_id)
+
+            if not vc or not vc.is_connected():
+                await interaction.response.send_message(
+                    "❌ I am not connected to a voice channel.",
+                    ephemeral=True,
+                )
+                return
+
+            if not vc.source or not hasattr(vc.source, "volume"):
+                await interaction.response.send_message(
+                    "❌ No active audio source.",
+                    ephemeral=True,
+                )
+                return
+
+            current_volume = float(vc.source.volume)
+
+            # Keep the current value inside the valid range.
+            current_volume = max(0.0, min(current_volume, 1.0))
+            new_volume = min(current_volume + 0.10, 1.0)
+
+            vc.source.volume = new_volume
+
+        await interaction.response.send_message(
+            f"🔊 **Volume:** {int(round(new_volume * 100))}%"
+        )
+
+    except (discord.ClientException, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /volumeup failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to increase the volume. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            await interaction.followup.send(
+                "❌ Failed to increase the volume. Please try again.",
+                ephemeral=True,
+            )
+        return
+
+    except (TypeError, ValueError) as exc:
+        print(
+            f"⚠️ /volumeup invalid source volume in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        try:
+            await interaction.response.send_message(
+                "❌ Current volume value is invalid.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+        return
+
+    except Exception as exc:
+        print(
+            f"❌ /volumeup unexpected error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        try:
+            await interaction.response.send_message(
+                "❌ Volume increase failed. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+
 
 # ===== 9. VOLUME_DOWN =====
 @bot.tree.command(name='volumedown', description='🔉 Decrease volume by 10%')
