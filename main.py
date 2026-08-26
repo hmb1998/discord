@@ -4837,29 +4837,113 @@ async def search(interaction: discord.Interaction, query: str):
 # ===== 22-31. FAVORITES =====
 @bot.tree.command(name='favorite_add', description='⭐ Save current song to favorites')
 async def favorite_add(interaction: discord.Interaction):
+    """Save the currently playing song to the user's favorites safely."""
+
+    # V33.1: Validate guild and protect favorites mutation under the playback lock.
     guild_id = interaction.guild_id
-    if guild_id not in bot.now_playing:
-        await interaction.response.send_message("❌ Nothing playing to favorite", ephemeral=True)
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    
+
     user_id = interaction.user.id
-    if user_id not in bot.favorites:
-        bot.favorites[user_id] = []
-    
-    song = bot.now_playing[guild_id]
-    # Check if already exists
-    for fav in bot.favorites[user_id]:
-        if fav['url'] == song['url']:
-            await interaction.response.send_message("⭐ Already in your favorites!", ephemeral=True)
-            return
-    
-    bot.favorites[user_id].append({
-        'title': song['title'],
-        'url': song['url'],
-        'duration': song['duration']
-    })
-    
-    await interaction.response.send_message(f"⭐ **Added to Favorites:** {song['title']}")
+
+    try:
+        async with _get_playback_lock(guild_id):
+            song = bot.now_playing.get(guild_id)
+
+            if not isinstance(song, dict):
+                await interaction.response.send_message(
+                    "❌ Nothing playing to favorite.",
+                    ephemeral=True,
+                )
+                return
+
+            song_snapshot = dict(song)
+
+            url = str(song_snapshot.get("url") or "").strip()
+
+            if not url:
+                await interaction.response.send_message(
+                    "❌ The current song has no valid URL.",
+                    ephemeral=True,
+                )
+                return
+
+            title = str(
+                song_snapshot.get("title") or "Unknown Title"
+            ).replace("\n", " ").strip()[:200]
+
+            duration = song_snapshot.get("duration", 0)
+
+            try:
+                duration = float(duration or 0)
+            except (TypeError, ValueError):
+                duration = 0
+
+            favorites = bot.favorites.setdefault(user_id, [])
+
+            for fav in favorites:
+                if not isinstance(fav, dict):
+                    continue
+
+                fav_url = str(
+                    fav.get("url") or ""
+                ).strip()
+
+                if fav_url == url:
+                    await interaction.response.send_message(
+                        "⭐ Already in your favorites!",
+                        ephemeral=True,
+                    )
+                    return
+
+            favorites.append({
+                "title": title,
+                "url": url,
+                "duration": duration,
+            })
+
+        await interaction.response.send_message(
+            f"⭐ **Added to Favorites:** {title}"
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /favorite_add Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to add the song to favorites. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to add the song to favorites. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /favorite_add failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to add the song to favorites. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 @bot.tree.command(name='favorite_remove', description='⭐ Remove a song from favorites')
 @app_commands.describe(index='Favorite number')
