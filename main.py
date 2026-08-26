@@ -4947,19 +4947,91 @@ async def favorite_add(interaction: discord.Interaction):
 
 @bot.tree.command(name='favorite_remove', description='⭐ Remove a song from favorites')
 @app_commands.describe(index='Favorite number')
-async def favorite_remove(interaction: discord.Interaction, index: int):
+async def favorite_remove(
+    interaction: discord.Interaction,
+    index: int,
+):
+    """Remove a favorite safely."""
+
+    # V34.1: Validate index and protect favorites mutation under the lock.
     user_id = interaction.user.id
-    if user_id not in bot.favorites or len(bot.favorites[user_id]) == 0:
-        await interaction.response.send_message("❌ No favorites saved", ephemeral=True)
-        return
-    
-    idx = index - 1
-    if idx < 0 or idx >= len(bot.favorites[user_id]):
-        await interaction.response.send_message(f"❌ Invalid index. You have {len(bot.favorites[user_id])} favorites.", ephemeral=True)
-        return
-    
-    song = bot.favorites[user_id].pop(idx)
-    await interaction.response.send_message(f"⭐ **Removed:** {song['title']}")
+
+    try:
+        index = int(index)
+
+        if index < 1:
+            await interaction.response.send_message(
+                "❌ Favorite number must be greater than 0.",
+                ephemeral=True,
+            )
+            return
+
+        async with _get_playback_lock(interaction.guild_id or 0):
+            favorites = bot.favorites.get(user_id)
+
+            if not favorites:
+                await interaction.response.send_message(
+                    "❌ No favorites saved.",
+                    ephemeral=True,
+                )
+                return
+
+            if index > len(favorites):
+                await interaction.response.send_message(
+                    f"❌ Invalid index. You have {len(favorites)} favorites.",
+                    ephemeral=True,
+                )
+                return
+
+            idx = index - 1
+            song = favorites[idx]
+
+            if isinstance(song, dict):
+                removed_title = str(
+                    song.get("title") or "Unknown Title"
+                ).replace("\n", " ").strip()[:200]
+            else:
+                removed_title = "Unknown Title"
+
+            favorites.pop(idx)
+
+        await interaction.response.send_message(
+            f"⭐ **Removed:** {removed_title}"
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /favorite_remove Discord error: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to remove the favorite. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to remove the favorite. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /favorite_remove failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to remove the favorite. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 @bot.tree.command(name='favorite_list', description='⭐ Show your favorite songs')
 async def favorite_list(interaction: discord.Interaction):
