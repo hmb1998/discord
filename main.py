@@ -4708,28 +4708,131 @@ async def disconnect(interaction: discord.Interaction):
 @bot.tree.command(name='search', description='🔍 Search for songs and choose one')
 @app_commands.describe(query='Search query')
 async def search(interaction: discord.Interaction, query: str):
-    await interaction.response.defer()
-    
-    with yt_dlp.YoutubeDL(build_ydl_options()) as ydl:
+    """Search YouTube safely and display up to five results."""
+
+    # V32.1: Validate query and protect search/result rendering.
+    guild_id = interaction.guild_id
+
+    query = str(query or "").strip()
+
+    if not query:
+        await interaction.response.send_message(
+            "❌ Please enter a search query.",
+            ephemeral=True,
+        )
+        return
+
+    if len(query) > 200:
+        await interaction.response.send_message(
+            "❌ Search query is too long. Maximum 200 characters.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        await interaction.response.defer()
+
+        search_query = f"ytsearch5:{query}"
+
+        with yt_dlp.YoutubeDL(build_ydl_options()) as ydl:
+            results = await asyncio.to_thread(
+                ydl.extract_info,
+                search_query,
+                download=False,
+            )
+
+        if not isinstance(results, dict):
+            await interaction.followup.send(
+                "❌ Search returned invalid results.",
+                ephemeral=True,
+            )
+            return
+
+        entries = results.get("entries") or []
+
+        valid_entries = [
+            entry
+            for entry in entries
+            if isinstance(entry, dict)
+        ][:5]
+
+        if not valid_entries:
+            await interaction.followup.send(
+                "❌ No results found.",
+                ephemeral=True,
+            )
+            return
+
+        safe_query = query.replace("\n", " ").replace("\r", " ")[:200]
+
+        embed = discord.Embed(
+            title=f"🔍 Search Results: {safe_query}"[:256],
+            color=discord.Color.blurple(),
+        )
+
+        shown = 0
+
+        for i, entry in enumerate(valid_entries, 1):
+            title = str(
+                entry.get("title") or "Unknown"
+            ).replace("\n", " ").replace("\r", " ")[:80]
+
+            uploader = str(
+                entry.get("uploader") or "Unknown"
+            ).replace("\n", " ").replace("\r", " ")[:30]
+
+            try:
+                duration = format_time(entry.get("duration", 0))
+            except Exception:
+                duration = "Unknown"
+
+            value = (
+                f"⏱ {str(duration)[:50]} | "
+                f"👤 {uploader}"
+            )
+
+            embed.add_field(
+                name=f"`{i}.` {title}"[:256],
+                value=value[:1024],
+                inline=False,
+            )
+
+            shown += 1
+
+        embed.set_footer(
+            text=f"Showing {shown} result{'s' if shown != 1 else ''} • "
+                 "Use /play with the song name or URL"
+        )
+
+        await interaction.followup.send(embed=embed)
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /search Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
         try:
-            results = ydl.extract_info(f"ytsearch5:{query}", download=False)
-            if not results or 'entries' not in results or len(results['entries']) == 0:
-                await interaction.followup.send("❌ No results found", ephemeral=True)
-                return
-            
-            embed = discord.Embed(title=f"🔍 Search Results: {query}", color=discord.Color.blurple())
-            for i, entry in enumerate(results['entries'], 1):
-                duration = format_time(entry.get('duration', 0))
-                embed.add_field(
-                    name=f"`{i}.` {entry.get('title', 'Unknown')[:80]}",
-                    value=f"⏱ {duration} | 👤 {entry.get('uploader', 'Unknown')[:30]}",
-                    inline=False
-                )
-            
-            embed.set_footer(text="Use /play with the song name or URL")
-            await interaction.followup.send(embed=embed)
-        except Exception as e:
-            await interaction.followup.send(f"❌ Search failed: {str(e)[:100]}", ephemeral=True)
+            await interaction.followup.send(
+                "❌ Failed to display search results. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+
+    except Exception as exc:
+        print(
+            f"❌ /search failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.followup.send(
+                "❌ Search failed. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 # ===== 22-31. FAVORITES =====
 @bot.tree.command(name='favorite_add', description='⭐ Save current song to favorites')
