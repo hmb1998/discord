@@ -4520,12 +4520,67 @@ async def move(interaction: discord.Interaction, from_position: int, to_position
 # ===== 18. JOIN =====
 @bot.tree.command(name='join', description='📡 Join your voice channel')
 async def join(interaction: discord.Interaction):
-    await interaction.response.defer()
-    if not await voice_check(interaction):
+    """Join the user's voice channel safely."""
+
+    # V29.1: Validate guild and protect voice-client acquisition.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    vc, _ = await get_voice_client(interaction)
-    if vc:
-        await interaction.followup.send(f"✅ **Joined** `{vc.channel.name}` 🎧")
+
+    try:
+        await interaction.response.defer()
+
+        if not await voice_check(interaction):
+            return
+
+        vc, _ = await get_voice_client(interaction)
+
+        if not vc or not vc.is_connected():
+            await interaction.followup.send(
+                "❌ I could not connect to your voice channel.",
+                ephemeral=True,
+            )
+            return
+
+        channel = getattr(vc, "channel", None)
+        channel_name = getattr(channel, "name", "Unknown")
+
+        await interaction.followup.send(
+            f"✅ **Joined** `{str(channel_name)[:100]}` 🎧"
+        )
+
+    except (discord.ClientException, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /join Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.followup.send(
+                "❌ Failed to join the voice channel. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+
+    except Exception as exc:
+        print(
+            f"❌ /join failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.followup.send(
+                "❌ Failed to join the voice channel. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 # ===== 19. LEAVE =====
 @bot.tree.command(name='leave', description='👋 Leave the voice channel')
