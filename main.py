@@ -3725,30 +3725,166 @@ async def queue(interaction: discord.Interaction):
 # ===== 11. NOWPLAYING =====
 @bot.tree.command(name='nowplaying', description='🎶 Show currently playing song')
 @app_commands.describe(ephemeral='Show only to you (default: False)')
-async def nowplaying(interaction: discord.Interaction, ephemeral: Optional[bool] = False):
+async def nowplaying(
+    interaction: discord.Interaction,
+    ephemeral: Optional[bool] = False,
+):
+    """Show the current playback state safely."""
+
+    # V22.1: Validate guild and snapshot playback state under the lock.
     guild_id = interaction.guild_id
-    if guild_id not in bot.now_playing:
-        await interaction.response.send_message("❌ Nothing is playing", ephemeral=True)
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    
-    song = bot.now_playing[guild_id]
-    vc = get_vc(guild_id)
-    
-    embed = discord.Embed(title="🎶 Now Playing", color=discord.Color.green())
-    embed.add_field(name="Title", value=f"[{song['title']}]({song['url']})")
-    embed.add_field(name="Duration", value=format_time(song['duration']))
-    embed.add_field(name="Channel", value=song.get('channel', 'Unknown'))
-    
-    if song.get('thumbnail'):
-        embed.set_thumbnail(url=song['thumbnail'])
-    
-    if vc and vc.source and hasattr(vc.source, 'volume'):
-        embed.add_field(name="Volume", value=f"{int(vc.source.volume*100)}%")
-    
-    embed.add_field(name="Queue", value=f"{len(bot.queues.get(guild_id, []))} songs")
-    embed.add_field(name="Status", value="▶️ Playing" if vc and vc.is_playing() else "⏸ Paused" if vc and vc.is_paused() else "⚫ Stopped")
-    
-    await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
+
+    try:
+        async with _get_playback_lock(guild_id):
+            song = bot.now_playing.get(guild_id)
+            queue_count = len(bot.queues.get(guild_id, []))
+
+            vc = get_vc(guild_id)
+
+            if vc and vc.is_connected():
+                if vc.is_playing():
+                    status = "▶️ Playing"
+                elif vc.is_paused():
+                    status = "⏸️ Paused"
+                else:
+                    status = "⚫ Stopped"
+            else:
+                status = "⚫ Disconnected"
+
+            volume = None
+            if (
+                vc
+                and vc.is_connected()
+                and vc.source
+                and hasattr(vc.source, "volume")
+            ):
+                try:
+                    volume = max(
+                        0.0,
+                        min(float(vc.source.volume), 1.0),
+                    )
+                except (TypeError, ValueError):
+                    volume = None
+
+            song_snapshot = dict(song) if isinstance(song, dict) else None
+
+        if not song_snapshot:
+            await interaction.response.send_message(
+                "❌ Nothing is currently playing.",
+                ephemeral=True,
+            )
+            return
+
+        title = str(
+            song_snapshot.get("title") or "Unknown Title"
+        ).replace("\n", " ")[:256]
+
+        url = str(song_snapshot.get("url") or "")
+        duration = format_time(song_snapshot.get("duration", 0))
+        channel = str(
+            song_snapshot.get("channel") or "Unknown"
+        ).replace("\n", " ")[:1024]
+
+        embed = discord.Embed(
+            title="🎶 Now Playing",
+            color=discord.Color.green(),
+        )
+
+        if url.startswith(("http://", "https://")):
+            title_value = f"[{title}]({url})"
+        else:
+            title_value = title
+
+        embed.add_field(
+            name="Title",
+            value=title_value[:1024],
+            inline=False,
+        )
+
+        embed.add_field(
+            name="Duration",
+            value=str(duration)[:1024],
+            inline=True,
+        )
+
+        embed.add_field(
+            name="Channel",
+            value=channel,
+            inline=True,
+        )
+
+        if volume is not None:
+            embed.add_field(
+                name="Volume",
+                value=f"{int(round(volume * 100))}%",
+                inline=True,
+            )
+
+        embed.add_field(
+            name="Queue",
+            value=f"{queue_count} song"
+            f"{'s' if queue_count != 1 else ''}",
+            inline=True,
+        )
+
+        embed.add_field(
+            name="Status",
+            value=status,
+            inline=True,
+        )
+
+        thumbnail = str(
+            song_snapshot.get("thumbnail") or ""
+        )
+
+        if thumbnail.startswith(("http://", "https://")):
+            embed.set_thumbnail(url=thumbnail)
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=bool(ephemeral),
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /nowplaying Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to display now playing information.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to display now playing information.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /nowplaying failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to display now playing information.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 # ===== 12. REMOVE =====
 @bot.tree.command(name='remove', description='🗑 Remove a song from queue by position')
