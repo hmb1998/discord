@@ -4211,27 +4211,68 @@ async def loop(interaction: discord.Interaction, mode: str):
 @bot.tree.command(name='seek', description='⏩ Seek to a position in the current song (seconds)')
 @app_commands.describe(seconds='Position in seconds')
 async def seek(interaction: discord.Interaction, seconds: int):
+    """Seek within the current song safely."""
+
+    # V27.1: Validate guild, seconds, and snapshot playback state safely.
     guild_id = interaction.guild_id
-    vc = get_vc(guild_id)
 
-    if not vc or not vc.is_connected() or not vc.is_playing():
+    if guild_id is None:
         await interaction.response.send_message(
-            "❌ Nothing is playing",
+            "❌ This command can only be used inside a server.",
             ephemeral=True,
         )
         return
 
-    if guild_id not in bot.now_playing:
+    try:
+        seconds = int(seconds)
+    except (TypeError, ValueError):
         await interaction.response.send_message(
-            "❌ No current song info",
+            "❌ Seek position must be a valid number of seconds.",
             ephemeral=True,
         )
         return
-
-    song = bot.now_playing[guild_id]
-    duration = song.get("duration", 0)
 
     if seconds < 0:
+        await interaction.response.send_message(
+            "❌ Position cannot be negative.",
+            ephemeral=True,
+        )
+        return
+
+    async with _get_playback_lock(guild_id):
+        vc = get_vc(guild_id)
+
+        if not vc or not vc.is_connected() or not vc.is_playing():
+            await interaction.response.send_message(
+                "❌ Nothing is playing.",
+                ephemeral=True,
+            )
+            return
+
+        song = bot.now_playing.get(guild_id)
+
+        if not isinstance(song, dict):
+            await interaction.response.send_message(
+                "❌ No current song info.",
+                ephemeral=True,
+            )
+            return
+
+        song = dict(song)
+        duration = song.get("duration", 0)
+
+    try:
+        duration = float(duration or 0)
+    except (TypeError, ValueError):
+        duration = 0
+
+    if duration > 0 and seconds > duration:
+        await interaction.response.send_message(
+            f"❌ Cannot seek past song duration ({format_time(duration)}).",
+            ephemeral=True,
+        )
+        return
+
         await interaction.response.send_message(
             "❌ Position cannot be negative",
             ephemeral=True,
