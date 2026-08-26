@@ -3310,14 +3310,88 @@ async def stop(interaction: discord.Interaction):
 @bot.tree.command(name='volume', description='🔊 Set the volume (0-100)')
 @app_commands.describe(percent='Volume percentage (0-100)')
 async def volume(interaction: discord.Interaction, percent: int):
+    """Set playback volume safely."""
+
+    # V19.1: Validate guild, voice state, source, and volume range.
     guild_id = interaction.guild_id
-    vc = get_vc(guild_id)
-    if not vc or not vc.source or not hasattr(vc.source, 'volume'):
-        await interaction.response.send_message("❌ No active audio source", ephemeral=True)
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    vol = max(0, min(100, percent)) / 100
-    vc.source.volume = vol
-    await interaction.response.send_message(f"🔊 **Volume:** {int(vol*100)}%")
+
+    try:
+        percent = int(percent)
+    except (TypeError, ValueError):
+        await interaction.response.send_message(
+            "❌ Volume must be a number between 0 and 100.",
+            ephemeral=True,
+        )
+        return
+
+    if percent < 0 or percent > 100:
+        await interaction.response.send_message(
+            "❌ Volume must be between 0 and 100.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        async with _get_playback_lock(guild_id):
+            vc = get_vc(guild_id)
+
+            if not vc or not vc.is_connected():
+                await interaction.response.send_message(
+                    "❌ I am not connected to a voice channel.",
+                    ephemeral=True,
+                )
+                return
+
+            if not vc.source or not hasattr(vc.source, "volume"):
+                await interaction.response.send_message(
+                    "❌ No active audio source.",
+                    ephemeral=True,
+                )
+                return
+
+            volume_value = percent / 100.0
+            vc.source.volume = volume_value
+
+        await interaction.response.send_message(
+            f"🔊 **Volume:** {percent}%"
+        )
+
+    except (discord.ClientException, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /volume failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to change the volume. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            await interaction.followup.send(
+                "❌ Failed to change the volume. Please try again.",
+                ephemeral=True,
+            )
+        return
+    except Exception as exc:
+        print(
+            f"❌ /volume unexpected error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        try:
+            await interaction.response.send_message(
+                "❌ Volume change failed. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+
 
 # ===== 8. VOLUME_UP =====
 @bot.tree.command(name='volumeup', description='🔊 Increase volume by 10%')
