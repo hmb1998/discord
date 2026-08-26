@@ -4585,18 +4585,105 @@ async def join(interaction: discord.Interaction):
 # ===== 19. LEAVE =====
 @bot.tree.command(name='leave', description='👋 Leave the voice channel')
 async def leave(interaction: discord.Interaction):
+    """Leave the current voice channel safely."""
+
+    # V30.1: Validate guild and protect stop/disconnect state.
     guild_id = interaction.guild_id
-    vc = get_vc(guild_id)
-    if vc and vc.is_connected():
-        channel_name = vc.channel.name
-        bot.queues[guild_id] = []
-        if vc.is_playing():
-            vc.stop()
-        await vc.disconnect()
-        bot.custom_voice_clients.pop(guild_id, None)
-        await interaction.response.send_message(f"👋 **Left** `{channel_name}`")
-    else:
-        await interaction.response.send_message("❌ Not connected", ephemeral=True)
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        async with _get_playback_lock(guild_id):
+            vc = get_vc(guild_id)
+
+            if not vc or not vc.is_connected():
+                await interaction.response.send_message(
+                    "❌ Not connected.",
+                    ephemeral=True,
+                )
+                return
+
+            channel = getattr(vc, "channel", None)
+            channel_name = str(
+                getattr(channel, "name", "Unknown")
+            )[:100]
+
+            # Invalidate pending playback callbacks before stopping.
+            bot.playback_generation[guild_id] = (
+                bot.playback_generation.get(guild_id, 0) + 1
+            )
+
+            bot.queues[guild_id] = []
+            bot.now_playing.pop(guild_id, None)
+
+            try:
+                if vc.is_playing() or vc.is_paused():
+                    vc.stop()
+            except (discord.ClientException, discord.HTTPException) as exc:
+                print(
+                    f"⚠️ /leave playback stop failed in guild {guild_id}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+            try:
+                await vc.disconnect()
+            except (discord.ClientException, discord.HTTPException) as exc:
+                print(
+                    f"⚠️ /leave disconnect failed in guild {guild_id}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                bot.custom_voice_clients.pop(guild_id, None)
+
+                await interaction.response.send_message(
+                    "❌ Failed to disconnect from the voice channel.",
+                    ephemeral=True,
+                )
+                return
+
+            bot.custom_voice_clients.pop(guild_id, None)
+
+        await interaction.response.send_message(
+            f"👋 **Left** `{channel_name}`"
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /leave Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to leave the voice channel. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to leave the voice channel. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /leave failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to leave the voice channel. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 # ===== 20. DISCONNECT =====
 @bot.tree.command(name='disconnect', description='👋 Same as /leave - disconnect from voice')
