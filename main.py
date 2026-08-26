@@ -4688,7 +4688,21 @@ async def leave(interaction: discord.Interaction):
 # ===== 20. DISCONNECT =====
 @bot.tree.command(name='disconnect', description='👋 Same as /leave - disconnect from voice')
 async def disconnect(interaction: discord.Interaction):
-    await leave.callback(interaction)
+    """Safely disconnect from voice by delegating to /leave."""
+
+    # V31.1: Reuse the hardened /leave implementation.
+    try:
+        await leave.callback(interaction)
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /disconnect Discord error: "
+            f"{type(exc).__name__}: {exc}"
+        )
+    except Exception as exc:
+        print(
+            f"❌ /disconnect failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
 
 # ===== 21. SEARCH =====
 @bot.tree.command(name='search', description='🔍 Search for songs and choose one')
