@@ -4417,22 +4417,105 @@ async def seek(interaction: discord.Interaction, seconds: int):
 @bot.tree.command(name='move', description='↕️ Move a song to a different position in queue')
 @app_commands.describe(from_position='Current position', to_position='New position')
 async def move(interaction: discord.Interaction, from_position: int, to_position: int):
+    """Move a queued song safely."""
+
+    # V28.1: Validate guild, positions, and mutate queue under the lock.
     guild_id = interaction.guild_id
-    if guild_id not in bot.queues or len(bot.queues[guild_id]) < 2:
-        await interaction.response.send_message("❌ Need at least 2 songs in queue", ephemeral=True)
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    
-    from_idx = from_position - 1
-    to_idx = to_position - 1
-    qlen = len(bot.queues[guild_id])
-    
-    if from_idx < 0 or from_idx >= qlen or to_idx < 0 or to_idx >= qlen:
-        await interaction.response.send_message(f"❌ Invalid position. Queue has {qlen} songs (1-{qlen})", ephemeral=True)
+
+    try:
+        from_position = int(from_position)
+        to_position = int(to_position)
+    except (TypeError, ValueError):
+        await interaction.response.send_message(
+            "❌ Positions must be valid numbers.",
+            ephemeral=True,
+        )
         return
-    
-    song = bot.queues[guild_id].pop(from_idx)
-    bot.queues[guild_id].insert(to_idx, song)
-    await interaction.response.send_message(f"↕️ **Moved:** `#{from_position}` → `#{to_position}` - {song['title']}")
+
+    if from_position < 1 or to_position < 1:
+        await interaction.response.send_message(
+            "❌ Positions must be greater than 0.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        async with _get_playback_lock(guild_id):
+            queue = bot.queues.get(guild_id)
+
+            if not queue or len(queue) < 2:
+                await interaction.response.send_message(
+                    "❌ Need at least 2 songs in queue.",
+                    ephemeral=True,
+                )
+                return
+
+            qlen = len(queue)
+
+            if from_position > qlen or to_position > qlen:
+                await interaction.response.send_message(
+                    f"❌ Invalid position. Queue has {qlen} songs (1-{qlen}).",
+                    ephemeral=True,
+                )
+                return
+
+            from_idx = from_position - 1
+            to_idx = to_position - 1
+
+            song = queue.pop(from_idx)
+            queue.insert(to_idx, song)
+
+            if isinstance(song, dict):
+                moved_title = str(
+                    song.get("title") or "Unknown Title"
+                ).replace("\n", " ")[:200]
+            else:
+                moved_title = "Unknown Title"
+
+        await interaction.response.send_message(
+            f"↕️ **Moved:** `#{from_position}` → `#{to_position}` - {moved_title}"
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /move Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to move the song. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to move the song. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /move failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to move the song. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 # ===== 18. JOIN =====
 @bot.tree.command(name='join', description='📡 Join your voice channel')
