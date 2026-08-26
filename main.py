@@ -4136,9 +4136,76 @@ async def shuffle(interaction: discord.Interaction):
     app_commands.Choice(name='🔁 Queue', value='queue')
 ])
 async def loop(interaction: discord.Interaction, mode: str):
+    """Set loop mode safely."""
+
+    # V26.1: Validate guild, mode, and update loop state under the lock.
     guild_id = interaction.guild_id
-    bot.loop_mode[guild_id] = mode
-    await interaction.response.send_message(f"🔄 **Loop:** {mode}")
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    allowed_modes = {"none", "song", "queue"}
+
+    try:
+        normalized_mode = str(mode or "").strip().lower()
+
+        if normalized_mode not in allowed_modes:
+            await interaction.response.send_message(
+                "❌ Invalid loop mode. Choose: none, song, or queue.",
+                ephemeral=True,
+            )
+            return
+
+        async with _get_playback_lock(guild_id):
+            bot.loop_mode[guild_id] = normalized_mode
+
+        labels = {
+            "none": "❌ None",
+            "song": "🔂 Song",
+            "queue": "🔁 Queue",
+        }
+
+        await interaction.response.send_message(
+            f"🔄 **Loop:** {labels[normalized_mode]}"
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /loop Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to change loop mode. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to change loop mode. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /loop failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to change loop mode. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 # ===== 16. SEEK =====
 @bot.tree.command(name='seek', description='⏩ Seek to a position in the current song (seconds)')
