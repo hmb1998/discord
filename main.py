@@ -6525,6 +6525,18 @@ async def stats(interaction: discord.Interaction):
     app_commands.Choice(name='🎛 Effects', value='effects')
 ])
 async def help(interaction: discord.Interaction, category: Optional[str] = 'all'):
+    """Show the bot command help safely."""
+
+    # V49.1: Validate category and protect help rendering.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
     commands_map = {
         'playback': ['play', 'playtop', 'pause', 'resume', 'skip', 'stop', 'seek', 'join', 'leave', 'disconnect'],
         'queue': ['queue', 'nowplaying', 'remove', 'clear', 'shuffle', 'loop', 'move', 'search'],
@@ -6534,20 +6546,88 @@ async def help(interaction: discord.Interaction, category: Optional[str] = 'all'
         'utility': ['volume', 'volumeup', 'volumedown', 'ping', 'uptime', 'stats', 'help', 'lyrics'],
         'effects': ['bassboost', 'nightcore', 'vaporwave', 'slow', 'speed', 'equalizer', 'karaoke']
     }
-    
-    embed = discord.Embed(title="ℹ️ **Music Bot Help**", color=discord.Color.blurple())
-    
-    if category == 'all':
-        for cat_name, cmds in commands_map.items():
-            cmd_list = [f"`/{c}`" for c in cmds]
-            embed.add_field(name=cat_name.capitalize(), value=", ".join(cmd_list), inline=False)
-    else:
-        cmds = commands_map.get(category, [])
-        cmd_list = [f"`/{c}`" for c in cmds]
-        embed.add_field(name=f"{category.capitalize()} Commands", value="\n".join(cmd_list), inline=False)
-    
-    embed.set_footer(text="Use /play <song> to start playing music!")
-    await interaction.response.send_message(embed=embed)
+
+    try:
+        requested_category = str(category or 'all').strip().lower()
+
+        if len(requested_category) > 50:
+            requested_category = requested_category[:50]
+
+        if requested_category != 'all' and requested_category not in commands_map:
+            valid_categories = ", ".join(f"`{name}`" for name in commands_map)
+            await interaction.response.send_message(
+                f"❌ Unknown category `{requested_category}`.\n"
+                f"Available categories: {valid_categories}",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title="ℹ️ **Music Bot Help**",
+            color=discord.Color.blurple(),
+        )
+
+        field_count = 0
+
+        if requested_category == 'all':
+            for cat_name, cmds in commands_map.items():
+                if field_count >= 25:
+                    break
+
+                safe_commands = [
+                    str(command).strip()
+                    for command in cmds
+                    if str(command).strip()
+                ]
+
+                if not safe_commands:
+                    continue
+
+                cmd_list = [f"`/{command}`" for command in safe_commands]
+
+                embed.add_field(
+                    name=str(cat_name).capitalize()[:256],
+                    value=", ".join(cmd_list)[:1024],
+                    inline=False,
+                )
+                field_count += 1
+        else:
+            cmds = commands_map.get(requested_category, [])
+            safe_commands = [
+                str(command).strip()
+                for command in cmds
+                if str(command).strip()
+            ]
+
+            cmd_list = [f"`/{command}`" for command in safe_commands]
+
+            embed.add_field(
+                name=f"{requested_category.capitalize()} Commands"[:256],
+                value="\n".join(cmd_list)[:1024] or "No commands available.",
+                inline=False,
+            )
+
+        embed.set_footer(
+            text="Use /play <song> to start playing music!"[:2048]
+        )
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True,
+        )
+
+    except (TypeError, ValueError, AttributeError):
+        try:
+            await interaction.response.send_message(
+                "❌ Could not render the help menu.",
+                ephemeral=True,
+            )
+        except (discord.NotFound, discord.HTTPException):
+            pass
+
+    except (discord.NotFound, discord.HTTPException):
+        pass
+
 
 # ===== 45-48. EFFECTS =====
 @bot.tree.command(name='bassboost', description='🎛 Toggle real bass boost')
