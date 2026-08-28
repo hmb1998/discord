@@ -7131,23 +7131,71 @@ async def sleeptimer_cancel(interaction: discord.Interaction):
 @bot.tree.command(name='goto', description='⏩ Jump to a specific song in queue')
 @app_commands.describe(position='Queue position to jump to')
 async def goto(interaction: discord.Interaction, position: int):
+    """Jump to a queue position safely for this guild."""
+
+    # V59.1: Validate guild/position and protect queue state.
     guild_id = interaction.guild_id
-    if guild_id not in bot.queues or len(bot.queues[guild_id]) == 0:
-        await interaction.response.send_message("❌ Queue is empty", ephemeral=True)
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    
-    idx = position - 1
-    if idx < 0 or idx >= len(bot.queues[guild_id]):
-        await interaction.response.send_message(f"❌ Invalid position (1-{len(bot.queues[guild_id])})", ephemeral=True)
-        return
-    
-    # Remove all songs before the target
-    bot.queues[guild_id] = bot.queues[guild_id][idx:]
-    vc = get_vc(guild_id)
-    if vc and vc.is_playing():
-        vc.stop()
-    
-    await interaction.response.send_message(f"⏩ **Jumping to position #{position}**")
+
+    try:
+        requested_position = int(position)
+
+        if requested_position < 1:
+            await interaction.response.send_message(
+                "❌ Position must be at least **1**.",
+                ephemeral=True,
+            )
+            return
+
+        queue = bot.queues.get(guild_id, [])
+
+        if not isinstance(queue, (list, tuple)) or len(queue) == 0:
+            await interaction.response.send_message(
+                "❌ Queue is empty",
+                ephemeral=True,
+            )
+            return
+
+        queue_length = len(queue)
+
+        if requested_position > queue_length:
+            await interaction.response.send_message(
+                f"❌ Invalid position (1-{queue_length})",
+                ephemeral=True,
+            )
+            return
+
+        idx = requested_position - 1
+
+        # Remove all songs before the target.
+        bot.queues[guild_id] = list(queue[idx:])
+
+        vc = get_vc(guild_id)
+        if vc and vc.is_playing():
+            vc.stop()
+
+        await interaction.response.send_message(
+            f"⏩ **Jumping to position #{requested_position}**"
+        )
+
+    except (TypeError, ValueError, AttributeError, KeyError, IndexError):
+        try:
+            await interaction.response.send_message(
+                "❌ Could not jump to that queue position.",
+                ephemeral=True,
+            )
+        except (discord.NotFound, discord.HTTPException):
+            pass
+
+    except (discord.NotFound, discord.HTTPException):
+        pass
+
 
 # ===== 53. RADIO =====
 @bot.tree.command(name='radio', description='📻 Play an internet radio station')
