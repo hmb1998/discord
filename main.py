@@ -6678,23 +6678,54 @@ async def bassboost(interaction: discord.Interaction):
 
 @bot.tree.command(name='nightcore', description='🎛 Toggle real nightcore effect')
 async def nightcore(interaction: discord.Interaction):
-    if not await voice_check(interaction):
+    """Toggle nightcore safely for this guild."""
+
+    # V51.1: Validate guild and protect audio-effect state.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
 
-    guild_id = interaction.guild_id
-    state = AUDIO_EFFECTS.setdefault(guild_id, {})
-    state["nightcore"] = not state.get("nightcore", False)
+    try:
+        if not await voice_check(interaction):
+            return
 
-    if state["nightcore"]:
-        state["vaporwave"] = False
+        state = AUDIO_EFFECTS.setdefault(guild_id, {})
 
-    status = "ON ⚡" if state["nightcore"] else "OFF ❌"
+        current = state.get("nightcore", False)
+        if not isinstance(current, bool):
+            current = bool(current)
 
-    await interaction.response.send_message(
-        f"⚡ **Nightcore:** {status}\n"
-        "🎵 Real FFmpeg pitch + speed effect enabled."
-    )
+        state["nightcore"] = not current
 
+        if state["nightcore"]:
+            state["vaporwave"] = False
+
+        status = "ON ⚡" if state["nightcore"] else "OFF ❌"
+
+        await interaction.response.send_message(
+            f"⚡ **Nightcore:** {status}\n"
+            "🎵 Real FFmpeg pitch + speed effect enabled."
+        )
+
+    except (TypeError, ValueError, AttributeError, KeyError):
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "❌ Could not update nightcore.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ Could not update nightcore.",
+                    ephemeral=True,
+                )
+        except (discord.NotFound, discord.HTTPException):
+            pass
 
 @bot.tree.command(name='vaporwave', description='🎛 Toggle real vaporwave effect')
 async def vaporwave(interaction: discord.Interaction):
