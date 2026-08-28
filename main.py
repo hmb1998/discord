@@ -6632,19 +6632,48 @@ async def help(interaction: discord.Interaction, category: Optional[str] = 'all'
 # ===== 45-48. EFFECTS =====
 @bot.tree.command(name='bassboost', description='🎛 Toggle real bass boost')
 async def bassboost(interaction: discord.Interaction):
-    if not await voice_check(interaction):
+    """Toggle bass boost safely for this guild."""
+
+    # V50.1: Validate guild and protect audio-effect state.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
 
-    guild_id = interaction.guild_id
-    state = AUDIO_EFFECTS.setdefault(guild_id, {})
-    state["bassboost"] = not state.get("bassboost", False)
+    try:
+        if not await voice_check(interaction):
+            return
 
-    status = "ON 🔥" if state["bassboost"] else "OFF ❌"
+        state = AUDIO_EFFECTS.setdefault(guild_id, {})
 
-    await interaction.response.send_message(
-        f"🔊 **Bass Boost:** {status}\n"
-        "🎵 Real FFmpeg bass boost will apply to the next playback/restart."
-    )
+        current = state.get("bassboost", False)
+        if not isinstance(current, bool):
+            current = bool(current)
+
+        state["bassboost"] = not current
+
+        status = "ON 🔥" if state["bassboost"] else "OFF ❌"
+
+        await interaction.response.send_message(
+            f"🔊 **Bass Boost:** {status}\n"
+            "🎵 Real FFmpeg bass boost will apply to the next playback/restart."
+        )
+
+    except (TypeError, ValueError, AttributeError, KeyError):
+        try:
+            await interaction.response.send_message(
+                "❌ Could not update bass boost.",
+                ephemeral=True,
+            )
+        except (discord.NotFound, discord.HTTPException):
+            pass
+
+    except (discord.NotFound, discord.HTTPException):
+        pass
 
 
 @bot.tree.command(name='nightcore', description='🎛 Toggle real nightcore effect')
