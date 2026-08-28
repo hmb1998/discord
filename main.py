@@ -5550,16 +5550,99 @@ async def playlist_add(interaction: discord.Interaction, name: str):
 
 @bot.tree.command(name='playlist_list', description='📁 List all your playlists')
 async def playlist_list(interaction: discord.Interaction):
-    user_id = interaction.user.id
-    if user_id not in bot.playlists or len(bot.playlists[user_id]) == 0:
-        await interaction.response.send_message("📭 No playlists yet. Use `/playlist_create` to create one!", ephemeral=True)
+    """List the user's playlists safely."""
+
+    # V40.1: Validate guild and protect playlist-list rendering.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    
-    embed = discord.Embed(title=f"📁 Playlists - {interaction.user.display_name}", color=discord.Color.teal())
-    for name, songs in bot.playlists[user_id].items():
-        embed.add_field(name=f"📁 {name}", value=f"{len(songs)} songs", inline=True)
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    user_id = interaction.user.id
+
+    try:
+        async with _get_playback_lock(guild_id):
+            playlists = bot.playlists.get(user_id) or {}
+            playlists_snapshot = {
+                str(name): list(songs) if isinstance(songs, list) else []
+                for name, songs in playlists.items()
+            }
+
+        if not playlists_snapshot:
+            await interaction.response.send_message(
+                "📭 No playlists yet. Use `/playlist_create` to create one!",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title=f"📁 Playlists - {str(interaction.user.display_name)[:100]}",
+            color=discord.Color.teal(),
+        )
+
+        field_count = 0
+
+        for name, songs in playlists_snapshot.items():
+            if field_count >= 25:
+                break
+
+            safe_name = str(name).replace("\n", " ").strip()[:100]
+            song_count = len(songs)
+
+            embed.add_field(
+                name=f"📁 {safe_name or 'Unnamed Playlist'}",
+                value=f"{song_count} songs",
+                inline=True,
+            )
+            field_count += 1
+
+        if len(playlists_snapshot) > field_count:
+            embed.set_footer(
+                text=f"... and {len(playlists_snapshot) - field_count} more playlists"
+            )
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True,
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /playlist_list Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to list your playlists. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to list your playlists. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /playlist_list failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to list your playlists. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 @bot.tree.command(name='playlist_play', description='📁 Play all songs from a playlist')
 @app_commands.describe(name='Playlist name')
