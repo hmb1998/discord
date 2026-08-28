@@ -6382,18 +6382,53 @@ async def ping(interaction: discord.Interaction):
 # ===== 42. UPTIME =====
 @bot.tree.command(name='uptime', description='⏰ Show bot uptime')
 async def uptime(interaction: discord.Interaction):
-    uptime_seconds = int(time.time() - bot.start_time)
-    days, remainder = divmod(uptime_seconds, 86400)
-    hours, remainder = divmod(remainder, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    
-    parts = []
-    if days > 0: parts.append(f"{days}d")
-    if hours > 0: parts.append(f"{hours}h")
-    if minutes > 0: parts.append(f"{minutes}m")
-    parts.append(f"{seconds}s")
-    
-    await interaction.response.send_message(f"⏰ **Uptime:** `{' '.join(parts)}`")
+    """Show bot uptime safely."""
+
+    # V47.1: Validate uptime state and protect response handling.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        start_time = float(bot.start_time)
+        current_time = time.time()
+        uptime_seconds = int(current_time - start_time)
+
+        if uptime_seconds < 0:
+            uptime_seconds = 0
+
+        days, remainder = divmod(uptime_seconds, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        parts = []
+        if days > 0:
+            parts.append(f"{days}d")
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0:
+            parts.append(f"{minutes}m")
+        parts.append(f"{seconds}s")
+
+        await interaction.response.send_message(
+            f"⏰ **Uptime:** `{' '.join(parts)}`"
+        )
+
+    except (TypeError, ValueError, OverflowError):
+        try:
+            await interaction.response.send_message(
+                "⏰ **Uptime:** `N/A`",
+                ephemeral=True,
+            )
+        except (discord.NotFound, discord.HTTPException):
+            return
+    except (discord.NotFound, discord.HTTPException):
+        return
 
 # ===== 43. STATS =====
 @bot.tree.command(name='stats', description='📊 Show bot statistics')
