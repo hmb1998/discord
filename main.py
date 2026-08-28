@@ -5647,37 +5647,172 @@ async def playlist_list(interaction: discord.Interaction):
 @bot.tree.command(name='playlist_play', description='📁 Play all songs from a playlist')
 @app_commands.describe(name='Playlist name')
 async def playlist_play(interaction: discord.Interaction, name: str):
-    await interaction.response.defer()
-    user_id = interaction.user.id
-    
-    if user_id not in bot.playlists or name not in bot.playlists[user_id]:
-        await interaction.followup.send(f"❌ Playlist '{name}' not found", ephemeral=True)
-        return
-    
-    songs = bot.playlists[user_id][name]
-    if not songs:
-        await interaction.followup.send(f"❌ Playlist '{name}' is empty", ephemeral=True)
-        return
-    
-    if not await voice_check(interaction):
-        return
-    
-    vc, _ = await get_voice_client(interaction)
-    if not vc:
-        return
-    
+    """Play all songs from a playlist safely."""
+
+    # V41.1: Validate guild/name and protect playlist playback state.
     guild_id = interaction.guild_id
-    if guild_id not in bot.queues:
-        bot.queues[guild_id] = []
-    
-    for song in songs:
-        bot.queues[guild_id].append(dict(song))
-    
-    if not vc.is_playing():
-        await interaction.followup.send(f"📁 **Playing Playlist:** '{name}' ({len(songs)} songs)")
-        await play_next(guild_id)
-    else:
-        await interaction.followup.send(f"📁 **Added Playlist to Queue:** '{name}' ({len(songs)} songs)")
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    name = str(name or "").strip()
+
+    if not name:
+        await interaction.response.send_message(
+            "❌ Playlist name cannot be empty.",
+            ephemeral=True,
+        )
+        return
+
+    if len(name) > 100:
+        await interaction.response.send_message(
+            "❌ Playlist name is too long. Maximum 100 characters.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        await interaction.response.defer()
+
+        user_id = interaction.user.id
+
+        async with _get_playback_lock(guild_id):
+            playlists = bot.playlists.get(user_id)
+
+            if not playlists or name not in playlists:
+                await interaction.followup.send(
+                    f"❌ Playlist '{name}' not found",
+                    ephemeral=True,
+                )
+                return
+
+            raw_songs = playlists.get(name)
+
+            if not isinstance(raw_songs, list) or not raw_songs:
+                await interaction.followup.send(
+                    f"❌ Playlist '{name}' is empty",
+                    ephemeral=True,
+                )
+                return
+
+            songs_snapshot = []
+
+            for song in list(raw_songs):
+                if not isinstance(song, dict):
+                    continue
+
+                song_snapshot = dict(song)
+
+                url = str(song_snapshot.get("url") or "").strip()
+                if not url:
+                    continue
+
+                title = str(
+                    song_snapshot.get("title") or "Unknown Title"
+                ).replace("\n", " ").strip()[:200]
+
+                duration = song_snapshot.get("duration", 0)
+
+                try:
+                    duration = float(duration or 0)
+                except (TypeError, ValueError):
+                    duration = 0
+
+                songs_snapshot.append({
+                    "title": title,
+                    "url": url,
+                    "duration": duration,
+                })
+
+                if len(songs_snapshot) >= 100:
+                    break
+
+        if not songs_snapshot:
+            await interaction.followup.send(
+                f"❌ Playlist '{name}' contains no valid songs.",
+                ephemeral=True,
+            )
+            return
+
+        if not await voice_check(interaction):
+            return
+
+        vc, _ = await get_voice_client(interaction)
+
+        if not vc or not vc.is_connected():
+            await interaction.followup.send(
+                "❌ I could not connect to your voice channel.",
+                ephemeral=True,
+            )
+            return
+
+        async with _get_playback_lock(guild_id):
+            queue = bot.queues.setdefault(guild_id, [])
+
+            for song in songs_snapshot:
+                queue.append(dict(song))
+
+            queue_size = len(queue)
+            already_playing = vc.is_playing() or vc.is_paused()
+
+        safe_name = name.replace("\n", " ")[:100]
+
+        if not already_playing:
+            await interaction.followup.send(
+                f"📁 **Playing Playlist:** '{safe_name}' "
+                f"({len(songs_snapshot)} songs)"
+            )
+            await play_next(guild_id)
+        else:
+            await interaction.followup.send(
+                f"📁 **Added Playlist to Queue:** '{safe_name}' "
+                f"({len(songs_snapshot)} songs) "
+                f"• Queue #{queue_size}"
+            )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /playlist_play Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "❌ Failed to play the playlist. Please try again.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ Failed to play the playlist. Please try again.",
+                    ephemeral=True,
+                )
+        except Exception:
+            pass
+
+    except Exception as exc:
+        print(
+            f"❌ /playlist_play failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "❌ Failed to play the playlist. Please try again.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ Failed to play the playlist. Please try again.",
+                    ephemeral=True,
+                )
+        except Exception:
+            pass
 
 @bot.tree.command(name='playlist_info', description='📁 Show details of a playlist')
 @app_commands.describe(name='Playlist name')
