@@ -7033,14 +7033,54 @@ async def karaoke(interaction: discord.Interaction):
 @bot.tree.command(name='sleep', description='💤 Set a sleep timer to stop music')
 @app_commands.describe(minutes='Minutes until stop (1-120)')
 async def sleep(interaction: discord.Interaction, minutes: int):
-    if minutes < 1 or minutes > 120:
-        await interaction.response.send_message("❌ Minutes must be between 1 and 120", ephemeral=True)
-        return
-    
+    """Set a safe per-guild sleep timer."""
+
+    # V57.1: Validate guild and protect sleep-timer state.
     guild_id = interaction.guild_id
-    bot.sleep_timers[guild_id] = time.time() + (minutes * 60)
-    
-    await interaction.response.send_message(f"💤 **Sleep Timer:** Music will stop in {minutes} minutes")
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        requested_minutes = int(minutes)
+
+        if requested_minutes < 1 or requested_minutes > 120:
+            await interaction.response.send_message(
+                "❌ Minutes must be between **1 and 120**.",
+                ephemeral=True,
+            )
+            return
+
+        if not hasattr(bot, "sleep_timers") or bot.sleep_timers is None:
+            bot.sleep_timers = {}
+
+        if not isinstance(bot.sleep_timers, dict):
+            bot.sleep_timers = {}
+
+        expires_at = time.time() + (requested_minutes * 60)
+        bot.sleep_timers[guild_id] = expires_at
+
+        await interaction.response.send_message(
+            f"💤 **Sleep Timer:** Music will stop in "
+            f"**{requested_minutes} minutes**."
+        )
+
+    except (TypeError, ValueError, AttributeError, KeyError, OverflowError):
+        try:
+            await interaction.response.send_message(
+                "❌ Could not set the sleep timer.",
+                ephemeral=True,
+            )
+        except (discord.NotFound, discord.HTTPException):
+            pass
+
+    except (discord.NotFound, discord.HTTPException):
+        pass
+
 
 @bot.tree.command(name='sleeptimer_cancel', description='💤 Cancel the sleep timer')
 async def sleeptimer_cancel(interaction: discord.Interaction):
