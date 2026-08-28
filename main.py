@@ -6433,20 +6433,83 @@ async def uptime(interaction: discord.Interaction):
 # ===== 43. STATS =====
 @bot.tree.command(name='stats', description='📊 Show bot statistics')
 async def stats(interaction: discord.Interaction):
-    guild_count = len(bot.guilds)
-    user_count = sum(g.member_count for g in bot.guilds)
-    total_played = sum(len(h) for h in bot.history.values())
-    total_queued = sum(len(q) for q in bot.queues.values())
-    
-    embed = discord.Embed(title="📊 Bot Statistics", color=discord.Color.blue())
-    embed.add_field(name="Servers", value=guild_count, inline=True)
-    embed.add_field(name="Users", value=user_count, inline=True)
-    embed.add_field(name="Songs Played", value=total_played, inline=True)
-    embed.add_field(name="Songs Queued", value=total_queued, inline=True)
-    embed.add_field(name="Active Players", value=len(bot.custom_voice_clients), inline=True)
-    embed.add_field(name="Ping", value=f"{round(bot.latency*1000)}ms", inline=True)
-    
-    await interaction.response.send_message(embed=embed)
+    """Show bot statistics safely."""
+
+    # V48.1: Validate guild and protect statistics rendering.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        guilds_snapshot = list(bot.guilds)
+
+        guild_count = len(guilds_snapshot)
+        user_count = 0
+
+        for guild in guilds_snapshot:
+            try:
+                member_count = int(guild.member_count or 0)
+            except (TypeError, ValueError, OverflowError):
+                member_count = 0
+
+            if member_count > 0:
+                user_count += member_count
+
+        history_values = list(bot.history.values())
+        queue_values = list(bot.queues.values())
+
+        total_played = sum(
+            len(history) if isinstance(history, (list, tuple)) else 0
+            for history in history_values
+        )
+
+        total_queued = sum(
+            len(queue) if isinstance(queue, (list, tuple)) else 0
+            for queue in queue_values
+        )
+
+        try:
+            active_players = len(bot.custom_voice_clients)
+        except (TypeError, AttributeError):
+            active_players = 0
+
+        try:
+            latency = float(bot.latency) * 1000
+            if not 0 <= latency < 1_000_000:
+                latency = 0.0
+            latency_text = f"{round(latency)}ms"
+        except (TypeError, ValueError, OverflowError):
+            latency_text = "N/A"
+
+        embed = discord.Embed(
+            title="📊 Bot Statistics",
+            color=discord.Color.blue(),
+        )
+
+        embed.add_field(name="Servers", value=guild_count, inline=True)
+        embed.add_field(name="Users", value=user_count, inline=True)
+        embed.add_field(name="Songs Played", value=total_played, inline=True)
+        embed.add_field(name="Songs Queued", value=total_queued, inline=True)
+        embed.add_field(name="Active Players", value=active_players, inline=True)
+        embed.add_field(name="Ping", value=latency_text, inline=True)
+
+        await interaction.response.send_message(embed=embed)
+
+    except (discord.NotFound, discord.HTTPException):
+        return
+    except (TypeError, ValueError, OverflowError, AttributeError):
+        try:
+            await interaction.response.send_message(
+                "❌ Unable to calculate bot statistics right now.",
+                ephemeral=True,
+            )
+        except (discord.NotFound, discord.HTTPException):
+            return
 
 # ===== 44. HELP =====
 @bot.tree.command(name='help', description='ℹ️ Show help with all commands')
