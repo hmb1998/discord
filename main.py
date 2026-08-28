@@ -5432,25 +5432,121 @@ async def playlist_delete(interaction: discord.Interaction, name: str):
 @bot.tree.command(name='playlist_add', description='📁 Add current song to a playlist')
 @app_commands.describe(name='Playlist name')
 async def playlist_add(interaction: discord.Interaction, name: str):
+    """Add the currently playing song to a playlist safely."""
+
+    # V39.1: Validate guild/name and protect playlist mutation.
     guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    name = str(name or "").strip()
+
+    if not name:
+        await interaction.response.send_message(
+            "❌ Playlist name cannot be empty.",
+            ephemeral=True,
+        )
+        return
+
+    if len(name) > 100:
+        await interaction.response.send_message(
+            "❌ Playlist name must be 100 characters or fewer.",
+            ephemeral=True,
+        )
+        return
+
     user_id = interaction.user.id
-    
-    if guild_id not in bot.now_playing:
-        await interaction.response.send_message("❌ Nothing is playing", ephemeral=True)
-        return
-    
-    if user_id not in bot.playlists or name not in bot.playlists[user_id]:
-        await interaction.response.send_message(f"❌ Playlist '{name}' not found", ephemeral=True)
-        return
-    
-    song = bot.now_playing[guild_id]
-    bot.playlists[user_id][name].append({
-        'title': song['title'],
-        'url': song['url'],
-        'duration': song['duration']
-    })
-    
-    await interaction.response.send_message(f"📁 **Added to '{name}':** {song['title']}")
+
+    try:
+        async with _get_playback_lock(guild_id):
+            song = bot.now_playing.get(guild_id)
+
+            if not isinstance(song, dict):
+                await interaction.response.send_message(
+                    "❌ Nothing is playing.",
+                    ephemeral=True,
+                )
+                return
+
+            playlists = bot.playlists.get(user_id)
+
+            if not playlists or name not in playlists:
+                await interaction.response.send_message(
+                    f"❌ Playlist '{name}' not found.",
+                    ephemeral=True,
+                )
+                return
+
+            song_snapshot = dict(song)
+
+            url = str(song_snapshot.get("url") or "").strip()
+
+            if not url:
+                await interaction.response.send_message(
+                    "❌ The current song has no valid URL.",
+                    ephemeral=True,
+                )
+                return
+
+            title = str(
+                song_snapshot.get("title") or "Unknown Title"
+            ).replace("\n", " ").strip()[:200]
+
+            duration = song_snapshot.get("duration", 0)
+
+            try:
+                duration = float(duration or 0)
+            except (TypeError, ValueError):
+                duration = 0
+
+            playlists[name].append({
+                "title": title,
+                "url": url,
+                "duration": duration,
+            })
+
+        await interaction.response.send_message(
+            f"📁 **Added to '{name}':** {title}"
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /playlist_add Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to add the song to the playlist. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to add the song to the playlist. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /playlist_add failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to add the song to the playlist. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 @bot.tree.command(name='playlist_list', description='📁 List all your playlists')
 async def playlist_list(interaction: discord.Interaction):
