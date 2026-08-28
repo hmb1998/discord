@@ -7206,36 +7206,84 @@ async def goto(interaction: discord.Interaction, position: int):
     app_commands.Choice(name='🎵 Classic Rock', value='https://streams.radio.co/rock'),
 ])
 async def radio(interaction: discord.Interaction, station: str):
-    await interaction.response.defer()
-    if not await voice_check(interaction):
-        return
-    
-    vc, _ = await get_voice_client(interaction)
-    if not vc:
-        return
-    
+    """Play an internet radio station safely for this guild."""
+
     guild_id = interaction.guild_id
-    
-    # Stop current playback
-    if vc.is_playing():
-        vc.stop()
-    
-    # Clear queue
-    bot.queues[guild_id] = []
-    
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
     try:
-        ffmpeg_opts = {"before_options": "-nostdin", "options": "-vn -b:a 128k"}
+        station = str(station or "").strip()
+        if not station:
+            await interaction.response.send_message(
+                "❌ Radio station is required.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        if not await voice_check(interaction):
+            return
+
+        vc, _ = await get_voice_client(interaction)
+        if not vc:
+            return
+
+        if vc.is_playing():
+            vc.stop()
+
+        bot.queues[guild_id] = []
+
+        ffmpeg_opts = {
+            "before_options": "-nostdin",
+            "options": "-vn -b:a 128k",
+        }
+
         source = discord.FFmpegPCMAudio(station, **ffmpeg_opts)
         vc.play(source)
+
         vc.source = discord.PCMVolumeTransformer(vc.source)
         vc.source.volume = DEFAULT_VOLUME
-        
-        bot.now_playing[guild_id] = {'title': f'📻 Radio: {station.split("/")[-1]}', 'url': station, 'duration': 0}
-        await interaction.followup.send(f"📻 **Now Playing:** Radio Station")
-    except Exception as e:
-        await interaction.followup.send(f"❌ Radio error: {str(e)[:100]}", ephemeral=True)
 
-# ===== 54-60. ADDITIONAL UTILITY COMMANDS =====
+        bot.now_playing[guild_id] = {
+            "title": f"📻 Radio: {station.split('/')[-1] or 'Station'}",
+            "url": station,
+            "duration": 0,
+        }
+
+        await interaction.followup.send(
+            "📻 **Now Playing:** Radio Station"
+        )
+
+    except (
+        TypeError,
+        ValueError,
+        AttributeError,
+        KeyError,
+        discord.NotFound,
+        discord.HTTPException,
+    ):
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "❌ Could not start the radio station.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ Could not start the radio station.",
+                    ephemeral=True,
+                )
+        except (discord.NotFound, discord.HTTPException):
+            pass
+
+
 @bot.tree.command(name='invite', description='📩 Get bot invite link')
 async def invite(interaction: discord.Interaction):
     invite_url = f"https://discord.com/api/oauth2/authorize?client_id={bot.user.id}&permissions=8&scope=bot%20applications.commands"
