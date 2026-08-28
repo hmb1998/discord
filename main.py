@@ -6729,23 +6729,54 @@ async def nightcore(interaction: discord.Interaction):
 
 @bot.tree.command(name='vaporwave', description='🎛 Toggle real vaporwave effect')
 async def vaporwave(interaction: discord.Interaction):
-    if not await voice_check(interaction):
+    """Toggle vaporwave safely for this guild."""
+
+    # V52.1: Validate guild and protect audio-effect state.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
 
-    guild_id = interaction.guild_id
-    state = AUDIO_EFFECTS.setdefault(guild_id, {})
-    state["vaporwave"] = not state.get("vaporwave", False)
+    try:
+        if not await voice_check(interaction):
+            return
 
-    if state["vaporwave"]:
-        state["nightcore"] = False
+        state = AUDIO_EFFECTS.setdefault(guild_id, {})
 
-    status = "ON 🌊" if state["vaporwave"] else "OFF ❌"
+        current = state.get("vaporwave", False)
+        if not isinstance(current, bool):
+            current = bool(current)
 
-    await interaction.response.send_message(
-        f"🌊 **Vaporwave:** {status}\n"
-        "🎵 Real FFmpeg pitch-down effect enabled."
-    )
+        state["vaporwave"] = not current
 
+        if state["vaporwave"]:
+            state["nightcore"] = False
+
+        status = "ON 🌊" if state["vaporwave"] else "OFF ❌"
+
+        await interaction.response.send_message(
+            f"🌊 **Vaporwave:** {status}\n"
+            "🎵 Real FFmpeg pitch-down effect enabled."
+        )
+
+    except (TypeError, ValueError, AttributeError, KeyError):
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "❌ Could not update vaporwave.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ Could not update vaporwave.",
+                    ephemeral=True,
+                )
+        except (discord.NotFound, discord.HTTPException):
+            pass
 
 @bot.tree.command(name='slow', description='🎛 Set playback speed to 0.5x')
 async def slow(interaction: discord.Interaction):
