@@ -6091,37 +6091,126 @@ async def history(interaction: discord.Interaction):
 @bot.tree.command(name='history_play', description='📜 Play a song from history')
 @app_commands.describe(index='History number')
 async def history_play(interaction: discord.Interaction, index: int):
-    await interaction.response.defer()
+    """Play a song safely from server playback history."""
+
+    # V44.1: Validate guild/index and protect history playback state.
     guild_id = interaction.guild_id
-    
-    if guild_id not in bot.history or len(bot.history[guild_id]) == 0:
-        await interaction.followup.send("📭 No history", ephemeral=True)
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    
-    idx = len(bot.history[guild_id]) - index
-    if idx < 0 or idx >= len(bot.history[guild_id]):
-        await interaction.followup.send(f"❌ Invalid index. History has {len(bot.history[guild_id])} entries.", ephemeral=True)
+
+    try:
+        index = int(index)
+    except (TypeError, ValueError):
+        await interaction.response.send_message(
+            "❌ Invalid history index.",
+            ephemeral=True,
+        )
         return
-    
-    song = bot.history[guild_id][idx]
-    
-    if not await voice_check(interaction):
+
+    if index < 1:
+        await interaction.response.send_message(
+            "❌ History index must be at least 1.",
+            ephemeral=True,
+        )
         return
-    
-    vc, _ = await get_voice_client(interaction)
-    if not vc:
+
+    await interaction.response.defer()
+
+    user_id = interaction.user.id
+
+    try:
+        async with _get_playback_lock(guild_id):
+            raw_history = bot.history.get(guild_id) or []
+            history_snapshot = list(raw_history)
+
+            if not history_snapshot:
+                await interaction.followup.send(
+                    "📭 No history",
+                    ephemeral=True,
+                )
+                return
+
+            if index > len(history_snapshot):
+                await interaction.followup.send(
+                    f"❌ Invalid index. History has {len(history_snapshot)} entries.",
+                    ephemeral=True,
+                )
+                return
+
+            song = history_snapshot[-index]
+
+            if not isinstance(song, dict):
+                await interaction.followup.send(
+                    "❌ This history entry is invalid.",
+                    ephemeral=True,
+                )
+                return
+
+            song_snapshot = dict(song)
+
+            url = str(song_snapshot.get("url") or "").strip()
+            if not url:
+                await interaction.followup.send(
+                    "❌ This history entry has no valid URL.",
+                    ephemeral=True,
+                )
+                return
+
+            title = str(song_snapshot.get("title") or "Unknown Title")
+            duration = song_snapshot.get("duration", 0)
+
+            try:
+                duration = float(duration or 0)
+            except (TypeError, ValueError):
+                duration = 0.0
+
+            song_snapshot = {
+                "title": title[:200],
+                "url": url,
+                "duration": duration,
+            }
+
+        if not await voice_check(interaction):
+            return
+
+        vc, _ = await get_voice_client(interaction)
+
+        if not vc or not vc.is_connected():
+            await interaction.followup.send(
+                "❌ I couldn't connect to your voice channel.",
+                ephemeral=True,
+            )
+            return
+
+        async with _get_playback_lock(guild_id):
+            queue = bot.queues.setdefault(guild_id, [])
+
+            queue.append(song_snapshot)
+
+            position = len(queue)
+            is_active = vc.is_playing() or vc.is_paused()
+
+        if not is_active:
+            await interaction.followup.send(
+                f"📜 **Playing from History:** {title}"
+            )
+            await play_next(guild_id)
+        else:
+            await interaction.followup.send(
+                f"📜 **Added from History:** {title} "
+                f"(Position #{position})"
+            )
+
+    except discord.NotFound:
         return
-    
-    if guild_id not in bot.queues:
-        bot.queues[guild_id] = []
-    
-    bot.queues[guild_id].append(dict(song))
-    
-    if not vc.is_playing():
-        await interaction.followup.send(f"📜 **Playing from History:** {song['title']}")
-        await play_next(guild_id)
-    else:
-        await interaction.followup.send(f"📜 **Added from History:** {song['title']} (Position #{len(bot.queues[guild_id])})")
+    except discord.HTTPException:
+        return
+
 
 # ===== 38-40. LYRICS =====
 @bot.tree.command(name='lyrics', description='📝 Get lyrics for current or specified song')
