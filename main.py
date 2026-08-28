@@ -5275,16 +5275,84 @@ async def favorite_play(interaction: discord.Interaction, index: int):
 @bot.tree.command(name='playlist_create', description='📁 Create a new playlist')
 @app_commands.describe(name='Playlist name')
 async def playlist_create(interaction: discord.Interaction, name: str):
-    user_id = interaction.user.id
-    if user_id not in bot.playlists:
-        bot.playlists[user_id] = {}
-    
-    if name in bot.playlists[user_id]:
-        await interaction.response.send_message(f"❌ Playlist '{name}' already exists!", ephemeral=True)
+    """Create a playlist safely."""
+
+    # V37.1: Validate guild/name and protect playlist mutation.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    
-    bot.playlists[user_id][name] = []
-    await interaction.response.send_message(f"📁 **Playlist Created:** '{name}'")
+
+    name = str(name or "").strip()
+
+    if not name:
+        await interaction.response.send_message(
+            "❌ Playlist name cannot be empty.",
+            ephemeral=True,
+        )
+        return
+
+    if len(name) > 100:
+        await interaction.response.send_message(
+            "❌ Playlist name must be 100 characters or fewer.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        async with _get_playback_lock(guild_id):
+            playlists = bot.playlists.setdefault(interaction.user.id, {})
+
+            if name in playlists:
+                await interaction.response.send_message(
+                    f"❌ Playlist '{name}' already exists!",
+                    ephemeral=True,
+                )
+                return
+
+            playlists[name] = []
+
+        await interaction.response.send_message(
+            f"📁 **Playlist Created:** '{name}'"
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /playlist_create Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to create the playlist. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to create the playlist. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /playlist_create failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to create the playlist. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 @bot.tree.command(name='playlist_delete', description='📁 Delete a playlist')
 @app_commands.describe(name='Playlist name')
