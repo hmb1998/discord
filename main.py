@@ -7084,12 +7084,48 @@ async def sleep(interaction: discord.Interaction, minutes: int):
 
 @bot.tree.command(name='sleeptimer_cancel', description='💤 Cancel the sleep timer')
 async def sleeptimer_cancel(interaction: discord.Interaction):
+    """Cancel the sleep timer safely for this guild."""
+
+    # V58.1: Validate guild and protect sleep-timer state.
     guild_id = interaction.guild_id
-    if guild_id in bot.sleep_timers:
-        del bot.sleep_timers[guild_id]
-        await interaction.response.send_message("💤 **Sleep Timer Cancelled**")
-    else:
-        await interaction.response.send_message("❌ No sleep timer active", ephemeral=True)
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        if not hasattr(bot, "sleep_timers") or bot.sleep_timers is None:
+            bot.sleep_timers = {}
+
+        if not isinstance(bot.sleep_timers, dict):
+            bot.sleep_timers = {}
+
+        if guild_id in bot.sleep_timers:
+            del bot.sleep_timers[guild_id]
+            await interaction.response.send_message(
+                "💤 **Sleep Timer Cancelled**"
+            )
+        else:
+            await interaction.response.send_message(
+                "❌ No sleep timer active",
+                ephemeral=True,
+            )
+
+    except (TypeError, ValueError, AttributeError, KeyError):
+        try:
+            await interaction.response.send_message(
+                "❌ Could not cancel the sleep timer.",
+                ephemeral=True,
+            )
+        except (discord.NotFound, discord.HTTPException):
+            pass
+
+    except (discord.NotFound, discord.HTTPException):
+        pass
+
 
 # ===== 51-52. GOTO =====
 @bot.tree.command(name='goto', description='⏩ Jump to a specific song in queue')
