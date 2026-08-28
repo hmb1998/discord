@@ -5981,16 +5981,112 @@ async def playlist_info(interaction: discord.Interaction, name: str):
 # ===== 36-37. HISTORY =====
 @bot.tree.command(name='history', description='📜 Show recently played songs')
 async def history(interaction: discord.Interaction):
+    """Show recent playback history safely."""
+
+    # V43.1: Validate guild and protect history rendering.
     guild_id = interaction.guild_id
-    if guild_id not in bot.history or len(bot.history[guild_id]) == 0:
-        await interaction.response.send_message("📭 No history yet", ephemeral=True)
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    
-    embed = discord.Embed(title="📜 Play History", color=discord.Color.dark_blue())
-    for i, song in enumerate(reversed(bot.history[guild_id][-20:]), 1):
-        embed.add_field(name=f"`{i}.` {song['title'][:80]}", value=f"⏱ {format_time(song.get('duration', 0))}", inline=False)
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    try:
+        async with _get_playback_lock(guild_id):
+            raw_history = bot.history.get(guild_id) or []
+
+            if not isinstance(raw_history, list):
+                history_snapshot = []
+            else:
+                history_snapshot = list(raw_history[-20:])
+
+        if not history_snapshot:
+            await interaction.response.send_message(
+                "📭 No history yet",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title="📜 Play History",
+            color=discord.Color.dark_blue(),
+        )
+
+        field_count = 0
+
+        for song in reversed(history_snapshot):
+            if field_count >= 20:
+                break
+
+            if not isinstance(song, dict):
+                continue
+
+            title = str(
+                song.get("title") or "Unknown Title"
+            ).replace("\n", " ").strip()[:80]
+
+            duration = song.get("duration", 0)
+
+            try:
+                duration = float(duration or 0)
+            except (TypeError, ValueError):
+                duration = 0
+
+            embed.add_field(
+                name=f"`{field_count + 1}.` {title}",
+                value=f"⏱ {format_time(duration)}",
+                inline=False,
+            )
+
+            field_count += 1
+
+        if field_count == 0:
+            await interaction.response.send_message(
+                "📭 No valid history entries yet.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True,
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /history Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to show playback history. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to show playback history. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /history failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to show playback history. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 @bot.tree.command(name='history_play', description='📜 Play a song from history')
 @app_commands.describe(index='History number')
