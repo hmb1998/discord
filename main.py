@@ -6345,8 +6345,39 @@ async def lyrics(interaction: discord.Interaction, song: Optional[str] = None):
 # ===== 41. PING =====
 @bot.tree.command(name='ping', description='🏓 Check bot latency')
 async def ping(interaction: discord.Interaction):
-    latency = round(bot.latency * 1000)
-    await interaction.response.send_message(f"🏓 **Pong!** `{latency}ms`")
+    """Show bot latency safely."""
+
+    # V46.1: Validate guild and protect ping response handling.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        latency = float(bot.latency) * 1000
+        if not 0 <= latency < 1_000_000:
+            latency = 0.0
+
+        latency_ms = round(latency)
+
+        await interaction.response.send_message(
+            f"🏓 **Pong!** `{latency_ms}ms`"
+        )
+
+    except (discord.NotFound, discord.HTTPException):
+        return
+    except (TypeError, ValueError, OverflowError):
+        try:
+            await interaction.response.send_message(
+                "🏓 **Pong!** `N/A`",
+                ephemeral=True,
+            )
+        except (discord.NotFound, discord.HTTPException):
+            return
 
 # ===== 42. UPTIME =====
 @bot.tree.command(name='uptime', description='⏰ Show bot uptime')
