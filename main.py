@@ -6982,19 +6982,52 @@ async def equalizer(interaction: discord.Interaction, preset: str):
 
 @bot.tree.command(name='karaoke', description='🎤 Toggle real karaoke vocal removal')
 async def karaoke(interaction: discord.Interaction):
-    if not await voice_check(interaction):
+    """Toggle karaoke vocal reduction safely for this guild."""
+
+    # V56.1: Validate guild and protect audio-effect state.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
 
-    guild_id = interaction.guild_id
-    state = AUDIO_EFFECTS.setdefault(guild_id, {})
-    state["karaoke"] = not state.get("karaoke", False)
+    try:
+        if not await voice_check(interaction):
+            return
 
-    status = "ON 🎤" if state["karaoke"] else "OFF ❌"
+        state = AUDIO_EFFECTS.setdefault(guild_id, {})
 
-    await interaction.response.send_message(
-        f"🎤 **Karaoke:** {status}\n"
-        "🎵 Real FFmpeg center-channel vocal reduction enabled."
-    )
+        if not isinstance(state, dict):
+            state = {}
+            AUDIO_EFFECTS[guild_id] = state
+
+        current = state.get("karaoke", False)
+        if not isinstance(current, bool):
+            current = bool(current)
+
+        state["karaoke"] = not current
+
+        status = "ON 🎤" if state["karaoke"] else "OFF ❌"
+
+        await interaction.response.send_message(
+            f"🎤 **Karaoke:** {status}\n"
+            "🎵 Real FFmpeg center-channel vocal reduction enabled."
+        )
+
+    except (TypeError, ValueError, AttributeError, KeyError):
+        try:
+            await interaction.response.send_message(
+                "❌ Could not update karaoke effect.",
+                ephemeral=True,
+            )
+        except (discord.NotFound, discord.HTTPException):
+            pass
+
+    except (discord.NotFound, discord.HTTPException):
+        pass
 
 
 @bot.tree.command(name='sleep', description='💤 Set a sleep timer to stop music')
