@@ -6904,17 +6904,80 @@ async def speed(interaction: discord.Interaction, multiplier: float):
     app_commands.Choice(name='🎻 Classical', value='classical')
 ])
 async def equalizer(interaction: discord.Interaction, preset: str):
-    if not await voice_check(interaction):
+    """Set a safe FFmpeg equalizer preset for this guild."""
+
+    # V55.1: Validate guild/preset and protect audio-effect state.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
 
-    guild_id = interaction.guild_id
-    state = AUDIO_EFFECTS.setdefault(guild_id, {})
-    state["equalizer"] = preset
+    try:
+        requested_preset = str(preset or "").strip().lower()
 
-    await interaction.response.send_message(
-        f"🎚️ **Equalizer:** `{preset}`\n"
-        "🎵 Real FFmpeg EQ enabled for next playback/restart."
-    )
+        if not requested_preset:
+            await interaction.response.send_message(
+                "❌ Please provide an equalizer preset.",
+                ephemeral=True,
+            )
+            return
+
+        if len(requested_preset) > 50:
+            await interaction.response.send_message(
+                "❌ Equalizer preset is too long.",
+                ephemeral=True,
+            )
+            return
+
+        valid_presets = {
+            "flat",
+            "rock",
+            "pop",
+            "jazz",
+            "classical",
+            "bass",
+            "treble",
+            "vocal",
+        }
+
+        if requested_preset not in valid_presets:
+            valid_list = ", ".join(sorted(valid_presets))
+            await interaction.response.send_message(
+                f"❌ Invalid preset. Available: `{valid_list}`",
+                ephemeral=True,
+            )
+            return
+
+        if not await voice_check(interaction):
+            return
+
+        state = AUDIO_EFFECTS.setdefault(guild_id, {})
+
+        if not isinstance(state, dict):
+            state = {}
+            AUDIO_EFFECTS[guild_id] = state
+
+        state["equalizer"] = requested_preset
+
+        await interaction.response.send_message(
+            f"🎚️ **Equalizer:** `{requested_preset}`\n"
+            "🎵 Real FFmpeg EQ enabled for next playback/restart."
+        )
+
+    except (TypeError, ValueError, AttributeError, KeyError):
+        try:
+            await interaction.response.send_message(
+                "❌ Could not update equalizer.",
+                ephemeral=True,
+            )
+        except (discord.NotFound, discord.HTTPException):
+            pass
+    except (discord.NotFound, discord.HTTPException):
+        pass
 
 
 @bot.tree.command(name='karaoke', description='🎤 Toggle real karaoke vocal removal')
