@@ -6780,18 +6780,44 @@ async def vaporwave(interaction: discord.Interaction):
 
 @bot.tree.command(name='slow', description='🎛 Set playback speed to 0.5x')
 async def slow(interaction: discord.Interaction):
-    if not await voice_check(interaction):
+    """Set playback speed to 0.5x safely for this guild."""
+
+    # V53.1: Validate guild and protect slow-mode state.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
 
-    guild_id = interaction.guild_id
-    state = AUDIO_EFFECTS.setdefault(guild_id, {})
-    state["speed"] = 0.5
+    try:
+        if not await voice_check(interaction):
+            return
 
-    await interaction.response.send_message(
-        "🐌 **Slow Mode:** `0.5x`\n"
-        "🎵 Real FFmpeg speed filter enabled."
-    )
+        state = AUDIO_EFFECTS.setdefault(guild_id, {})
+        state["speed"] = 0.5
 
+        await interaction.response.send_message(
+            "🐌 **Slow Mode:** `0.5x`\n"
+            "🎵 Real FFmpeg speed filter enabled."
+        )
+
+    except (TypeError, ValueError, AttributeError, KeyError):
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "❌ Could not enable slow mode.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ Could not enable slow mode.",
+                    ephemeral=True,
+                )
+        except (discord.NotFound, discord.HTTPException):
+            pass
 
 @bot.tree.command(name='speed', description='🎛 Change real playback speed (0.5-2.0)')
 @app_commands.describe(multiplier='Speed multiplier (0.5-2.0)')
