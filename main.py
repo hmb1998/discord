@@ -6822,25 +6822,75 @@ async def slow(interaction: discord.Interaction):
 @bot.tree.command(name='speed', description='🎛 Change real playback speed (0.5-2.0)')
 @app_commands.describe(multiplier='Speed multiplier (0.5-2.0)')
 async def speed(interaction: discord.Interaction, multiplier: float):
-    if multiplier < 0.5 or multiplier > 2.0:
+    """Set playback speed safely for this guild."""
+
+    # V54.1: Validate guild and protect playback-speed state.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
         await interaction.response.send_message(
-            "❌ Speed must be between **0.5 and 2.0**",
-            ephemeral=True
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
         )
         return
 
-    if not await voice_check(interaction):
-        return
+    try:
+        multiplier = float(multiplier)
 
-    guild_id = interaction.guild_id
-    state = AUDIO_EFFECTS.setdefault(guild_id, {})
-    state["speed"] = multiplier
+        if not math.isfinite(multiplier):
+            await interaction.response.send_message(
+                "❌ Speed must be a finite number between **0.5 and 2.0**.",
+                ephemeral=True,
+            )
+            return
 
-    await interaction.response.send_message(
-        f"⚡ **Playback Speed:** `{multiplier}x`\n"
-        "🎵 Real FFmpeg speed filter enabled for next playback/restart."
-    )
+        if not 0.5 <= multiplier <= 2.0:
+            await interaction.response.send_message(
+                "❌ Speed must be between **0.5 and 2.0**.",
+                ephemeral=True,
+            )
+            return
 
+        if not await voice_check(interaction):
+            return
+
+        state = AUDIO_EFFECTS.setdefault(guild_id, {})
+        state["speed"] = multiplier
+
+        await interaction.response.send_message(
+            f"⚡ **Playback Speed:** `{multiplier:g}x`\n"
+            "🎵 Real FFmpeg speed filter enabled for next playback/restart."
+        )
+
+    except (TypeError, ValueError, OverflowError):
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "❌ Invalid speed value. Use a number between **0.5 and 2.0**.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ Invalid speed value. Use a number between **0.5 and 2.0**.",
+                    ephemeral=True,
+                )
+        except (discord.NotFound, discord.HTTPException):
+            pass
+
+    except (AttributeError, KeyError):
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "❌ Could not update playback speed.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ Could not update playback speed.",
+                    ephemeral=True,
+                )
+        except (discord.NotFound, discord.HTTPException):
+            pass
 
 @bot.tree.command(name='equalizer', description='🎛 Set real FFmpeg equalizer')
 @app_commands.choices(preset=[
