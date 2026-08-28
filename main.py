@@ -5817,27 +5817,166 @@ async def playlist_play(interaction: discord.Interaction, name: str):
 @bot.tree.command(name='playlist_info', description='📁 Show details of a playlist')
 @app_commands.describe(name='Playlist name')
 async def playlist_info(interaction: discord.Interaction, name: str):
+    """Show playlist details safely."""
+
+    # V42.1: Validate guild/name and protect playlist-info rendering.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    name = str(name or "").strip()
+
+    if not name:
+        await interaction.response.send_message(
+            "❌ Playlist name cannot be empty.",
+            ephemeral=True,
+        )
+        return
+
+    if len(name) > 100:
+        await interaction.response.send_message(
+            "❌ Playlist name is too long. Maximum 100 characters.",
+            ephemeral=True,
+        )
+        return
+
     user_id = interaction.user.id
-    if user_id not in bot.playlists or name not in bot.playlists[user_id]:
-        await interaction.response.send_message(f"❌ Playlist '{name}' not found", ephemeral=True)
-        return
-    
-    songs = bot.playlists[user_id][name]
-    if not songs:
-        await interaction.response.send_message(f"📁 '{name}' is empty", ephemeral=True)
-        return
-    
-    embed = discord.Embed(title=f"📁 Playlist: {name}", color=discord.Color.teal())
-    total_dur = sum(s.get('duration', 0) for s in songs)
-    embed.set_footer(text=f"{len(songs)} songs | Total: {format_time(total_dur)}")
-    
-    for i, s in enumerate(songs, 1):
-        embed.add_field(name=f"`{i}.` {s['title'][:80]}", value=f"⏱ {format_time(s.get('duration', 0))}", inline=False)
-        if i >= 15:
-            embed.add_field(name=f"... and {len(songs)-15} more", value="", inline=False)
-            break
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    try:
+        async with _get_playback_lock(guild_id):
+            playlists = bot.playlists.get(user_id)
+
+            if not playlists or name not in playlists:
+                await interaction.response.send_message(
+                    f"❌ Playlist '{name}' not found",
+                    ephemeral=True,
+                )
+                return
+
+            raw_songs = playlists.get(name)
+
+            if not isinstance(raw_songs, list) or not raw_songs:
+                await interaction.response.send_message(
+                    f"📁 '{name}' is empty",
+                    ephemeral=True,
+                )
+                return
+
+            songs_snapshot = [
+                dict(song)
+                for song in list(raw_songs)
+                if isinstance(song, dict)
+            ]
+
+        if not songs_snapshot:
+            await interaction.response.send_message(
+                f"📁 '{name}' contains no valid songs.",
+                ephemeral=True,
+            )
+            return
+
+        safe_name = name.replace("\n", " ").strip()[:100]
+
+        embed = discord.Embed(
+            title=f"📁 Playlist: {safe_name or 'Unnamed Playlist'}",
+            color=discord.Color.teal(),
+        )
+
+        total_dur = 0.0
+
+        for song in songs_snapshot:
+            duration = song.get("duration", 0)
+
+            try:
+                total_dur += float(duration or 0)
+            except (TypeError, ValueError):
+                continue
+
+        embed.set_footer(
+            text=f"{len(songs_snapshot)} songs | Total: {format_time(total_dur)}"
+        )
+
+        field_count = 0
+
+        for i, song in enumerate(songs_snapshot, 1):
+            if field_count >= 15:
+                break
+
+            title = str(
+                song.get("title") or "Unknown Title"
+            ).replace("\n", " ").strip()[:80]
+
+            duration = song.get("duration", 0)
+
+            try:
+                duration_text = format_time(float(duration or 0))
+            except (TypeError, ValueError):
+                duration_text = format_time(0)
+
+            embed.add_field(
+                name=f"`{i}.` {title or 'Unknown Title'}",
+                value=f"⏱ {duration_text}",
+                inline=False,
+            )
+
+            field_count += 1
+
+        if len(songs_snapshot) > field_count:
+            embed.add_field(
+                name=f"... and {len(songs_snapshot) - field_count} more",
+                value="",
+                inline=False,
+            )
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True,
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /playlist_info Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "❌ Failed to show playlist information. Please try again.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ Failed to show playlist information. Please try again.",
+                    ephemeral=True,
+                )
+        except Exception:
+            pass
+
+    except Exception as exc:
+        print(
+            f"❌ /playlist_info failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "❌ Failed to show playlist information. Please try again.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ Failed to show playlist information. Please try again.",
+                    ephemeral=True,
+                )
+        except Exception:
+            pass
 
 # ===== 36-37. HISTORY =====
 @bot.tree.command(name='history', description='📜 Show recently played songs')
