@@ -6216,39 +6216,131 @@ async def history_play(interaction: discord.Interaction, index: int):
 @bot.tree.command(name='lyrics', description='📝 Get lyrics for current or specified song')
 @app_commands.describe(song='Song name (optional, uses current if empty)')
 async def lyrics(interaction: discord.Interaction, song: Optional[str] = None):
-    await interaction.response.defer()
-    
-    if not song:
-        guild_id = interaction.guild_id
-        if guild_id not in bot.now_playing:
-            await interaction.followup.send("❌ Nothing playing. Provide a song name!", ephemeral=True)
-            return
-        song = bot.now_playing[guild_id]['title']
-    
+    """Fetch and display lyrics safely."""
+
+    # V45.1: Validate guild/song and protect lyrics API handling.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    requested_song = str(song or "").strip()
+
     try:
-        import urllib.request
+        async with _get_playback_lock(guild_id):
+            if not requested_song:
+                now_playing = bot.now_playing.get(guild_id)
+
+                if not isinstance(now_playing, dict):
+                    await interaction.response.send_message(
+                        "❌ Nothing playing. Provide a song name!",
+                        ephemeral=True,
+                    )
+                    return
+
+                requested_song = str(
+                    now_playing.get("title") or ""
+                ).strip()
+
+            if not requested_song:
+                await interaction.response.send_message(
+                    "❌ Please provide a valid song name.",
+                    ephemeral=True,
+                )
+                return
+
+            requested_song = requested_song[:200]
+
+        await interaction.response.defer()
+
+        import urllib.error
         import urllib.parse
+        import urllib.request
         import json as json_module
-        
-        query = urllib.parse.quote(song)
-        url = f"https://api.lyrics.ovh/v1/{query}"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = json_module.loads(response.read())
-        
-        lyrics_text = data.get('lyrics', 'No lyrics found')
-        if not lyrics_text or lyrics_text == '':
-            await interaction.followup.send(f"❌ No lyrics found for '{song}'", ephemeral=True)
+
+        query = urllib.parse.quote(requested_song, safe="")
+        api_url = f"https://api.lyrics.ovh/v1/{query}"
+
+        request = urllib.request.Request(
+            api_url,
+            headers={
+                "User-Agent": "HMB-Music-Bot/1.0",
+                "Accept": "application/json",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                raw_data = response.read()
+
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                await interaction.followup.send(
+                    f"❌ No lyrics found for `{requested_song}`.",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.followup.send(
+                "❌ Lyrics service returned an HTTP error.",
+                ephemeral=True,
+            )
             return
-        
-        if len(lyrics_text) > 4000:
-            lyrics_text = lyrics_text[:3997] + "..."
-        
-        embed = discord.Embed(title=f"📝 Lyrics: {song}", description=lyrics_text, color=discord.Color.purple())
+
+        except (urllib.error.URLError, TimeoutError):
+            await interaction.followup.send(
+                "❌ Lyrics service is unavailable right now.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            data = json_module.loads(raw_data)
+        except (TypeError, ValueError):
+            await interaction.followup.send(
+                "❌ Invalid response received from the lyrics service.",
+                ephemeral=True,
+            )
+            return
+
+        if not isinstance(data, dict):
+            await interaction.followup.send(
+                "❌ Invalid lyrics response.",
+                ephemeral=True,
+            )
+            return
+
+        lyrics_text = str(data.get("lyrics") or "").strip()
+
+        if not lyrics_text:
+            await interaction.followup.send(
+                f"❌ No lyrics found for `{requested_song}`.",
+                ephemeral=True,
+            )
+            return
+
+        lyrics_text = lyrics_text[:4000]
+
+        safe_title = requested_song.replace("\n", " ").replace("\r", " ")
+        safe_title = safe_title[:200]
+
+        embed = discord.Embed(
+            title=f"📝 Lyrics: {safe_title}",
+            description=lyrics_text,
+            color=discord.Color.purple(),
+        )
+
         await interaction.followup.send(embed=embed)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Could not fetch lyrics: {str(e)[:100]}", ephemeral=True)
+
+    except discord.NotFound:
+        return
+
+    except discord.HTTPException:
+        return
 
 # ===== 41. PING =====
 @bot.tree.command(name='ping', description='🏓 Check bot latency')
