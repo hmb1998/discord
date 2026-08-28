@@ -5143,37 +5143,133 @@ async def favorite_list(interaction: discord.Interaction):
 @bot.tree.command(name='favorite_play', description='⭐ Play a song from your favorites')
 @app_commands.describe(index='Favorite number to play')
 async def favorite_play(interaction: discord.Interaction, index: int):
-    await interaction.response.defer()
-    user_id = interaction.user.id
-    if user_id not in bot.favorites or len(bot.favorites[user_id]) == 0:
-        await interaction.followup.send("❌ No favorites saved", ephemeral=True)
-        return
-    
-    idx = index - 1
-    if idx < 0 or idx >= len(bot.favorites[user_id]):
-        await interaction.followup.send(f"❌ Invalid index", ephemeral=True)
-        return
-    
-    song = bot.favorites[user_id][idx]
-    
-    if not await voice_check(interaction):
-        return
-    
-    vc, _ = await get_voice_client(interaction)
-    if not vc:
-        return
-    
+    """Play a saved favorite safely."""
+
+    # V36.1: Validate guild, index, and protect favorite playback state.
     guild_id = interaction.guild_id
-    if guild_id not in bot.queues:
-        bot.queues[guild_id] = []
-    
-    bot.queues[guild_id].append(song)
-    
-    if not vc.is_playing():
-        await interaction.followup.send(f"⭐ **Playing from Favorites:** {song['title']}")
-        await play_next(guild_id)
-    else:
-        await interaction.followup.send(f"⭐ **Added from Favorites:** {song['title']} (Position #{len(bot.queues[guild_id])})")
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    user_id = interaction.user.id
+
+    try:
+        index = int(index)
+
+        if index < 1:
+            await interaction.response.send_message(
+                "❌ Favorite number must be greater than 0.",
+                ephemeral=True,
+            )
+            return
+
+        async with _get_playback_lock(guild_id):
+            favorites = bot.favorites.get(user_id) or []
+            favorites_snapshot = list(favorites)
+
+            if index > len(favorites_snapshot):
+                await interaction.response.send_message(
+                    f"❌ Invalid favorite number. You have {len(favorites_snapshot)} favorites.",
+                    ephemeral=True,
+                )
+                return
+
+            song = favorites_snapshot[index - 1]
+
+            if not isinstance(song, dict):
+                await interaction.response.send_message(
+                    "❌ This favorite is invalid.",
+                    ephemeral=True,
+                )
+                return
+
+            url = str(song.get("url") or "").strip()
+
+            if not url:
+                await interaction.response.send_message(
+                    "❌ This favorite has no valid URL.",
+                    ephemeral=True,
+                )
+                return
+
+            title = str(
+                song.get("title") or "Unknown Title"
+            ).replace("\n", " ").strip()[:200]
+
+            duration = song.get("duration", 0)
+
+            try:
+                duration = float(duration or 0)
+            except (TypeError, ValueError):
+                duration = 0
+
+            song_snapshot = {
+                "title": title or "Unknown Title",
+                "url": url,
+                "duration": duration,
+            }
+
+        if not await voice_check(interaction):
+            return
+
+        vc, _ = await get_voice_client(interaction)
+
+        if not vc or not vc.is_connected():
+            await interaction.followup.send(
+                "❌ I could not connect to your voice channel.",
+                ephemeral=True,
+            )
+            return
+
+        async with _get_playback_lock(guild_id):
+            queue = bot.queues.setdefault(guild_id, [])
+            queue.append(song_snapshot)
+
+            position = len(queue)
+            currently_playing = vc.is_playing()
+
+        if not currently_playing:
+            await interaction.followup.send(
+                f"⭐ **Playing from Favorites:** {song_snapshot['title']}"
+            )
+            await play_next(guild_id)
+        else:
+            await interaction.followup.send(
+                f"⭐ **Added from Favorites:** {song_snapshot['title']} "
+                f"(Position #{position})"
+            )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /favorite_play Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.followup.send(
+                "❌ Failed to play the favorite. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+
+    except Exception as exc:
+        print(
+            f"❌ /favorite_play failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.followup.send(
+                "❌ Failed to play the favorite. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 # ===== 32-35. PLAYLISTS =====
 @bot.tree.command(name='playlist_create', description='📁 Create a new playlist')
