@@ -5357,13 +5357,77 @@ async def playlist_create(interaction: discord.Interaction, name: str):
 @bot.tree.command(name='playlist_delete', description='📁 Delete a playlist')
 @app_commands.describe(name='Playlist name')
 async def playlist_delete(interaction: discord.Interaction, name: str):
-    user_id = interaction.user.id
-    if user_id not in bot.playlists or name not in bot.playlists[user_id]:
-        await interaction.response.send_message(f"❌ Playlist '{name}' not found", ephemeral=True)
+    """Delete a playlist safely."""
+
+    # V38.1: Validate guild/name and protect playlist deletion.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    
-    del bot.playlists[user_id][name]
-    await interaction.response.send_message(f"🗑 **Playlist Deleted:** '{name}'")
+
+    name = str(name or "").strip()
+
+    if not name:
+        await interaction.response.send_message(
+            "❌ Playlist name cannot be empty.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        async with _get_playback_lock(guild_id):
+            playlists = bot.playlists.get(interaction.user.id)
+
+            if not playlists or name not in playlists:
+                await interaction.response.send_message(
+                    f"❌ Playlist '{name}' not found.",
+                    ephemeral=True,
+                )
+                return
+
+            del playlists[name]
+
+        await interaction.response.send_message(
+            f"🗑 **Playlist Deleted:** '{name}'"
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /playlist_delete Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to delete the playlist. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to delete the playlist. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /playlist_delete failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to delete the playlist. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 @bot.tree.command(name='playlist_add', description='📁 Add current song to a playlist')
 @app_commands.describe(name='Playlist name')
