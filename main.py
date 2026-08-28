@@ -5035,16 +5035,110 @@ async def favorite_remove(
 
 @bot.tree.command(name='favorite_list', description='⭐ Show your favorite songs')
 async def favorite_list(interaction: discord.Interaction):
-    user_id = interaction.user.id
-    if user_id not in bot.favorites or len(bot.favorites[user_id]) == 0:
-        await interaction.response.send_message("📭 No favorites saved yet. Use `/favorite_add` to save songs!", ephemeral=True)
+    """Show the user's favorites safely."""
+
+    # V35.1: Validate guild and protect favorite-list rendering.
+    guild_id = interaction.guild_id
+
+    if guild_id is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True,
+        )
         return
-    
-    embed = discord.Embed(title=f"⭐ Favorites - {interaction.user.display_name}", color=discord.Color.gold())
-    for i, fav in enumerate(bot.favorites[user_id], 1):
-        embed.add_field(name=f"`{i}.` {fav['title'][:80]}", value=f"⏱ {format_time(fav['duration'])}", inline=False)
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    user_id = interaction.user.id
+
+    try:
+        async with _get_playback_lock(guild_id):
+            favorites = bot.favorites.get(user_id) or []
+            favorites_snapshot = list(favorites)
+
+        if not favorites_snapshot:
+            await interaction.response.send_message(
+                "📭 No favorites saved yet. Use `/favorite_add` to save songs!",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title=f"⭐ Favorites - {str(interaction.user.display_name)[:100]}",
+            color=discord.Color.gold(),
+        )
+
+        field_count = 0
+
+        for i, fav in enumerate(favorites_snapshot, 1):
+            if field_count >= 25:
+                break
+
+            if not isinstance(fav, dict):
+                continue
+
+            title = str(
+                fav.get("title") or "Unknown Title"
+            ).replace("\n", " ").strip()[:80]
+
+            duration = fav.get("duration", 0)
+
+            try:
+                duration_text = format_time(duration)
+            except Exception:
+                duration_text = "Unknown"
+
+            embed.add_field(
+                name=f"`{i}.` {title or 'Unknown Title'}",
+                value=f"⏱ {str(duration_text)[:100]}",
+                inline=False,
+            )
+
+            field_count += 1
+
+        if field_count == 0:
+            await interaction.response.send_message(
+                "📭 No valid favorites saved yet.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True,
+        )
+
+    except (discord.NotFound, discord.HTTPException) as exc:
+        print(
+            f"⚠️ /favorite_list Discord error in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to load your favorites. Please try again.",
+                ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(
+                    "❌ Failed to load your favorites. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(
+            f"❌ /favorite_list failed in guild {guild_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        try:
+            await interaction.response.send_message(
+                "❌ Failed to load your favorites. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 @bot.tree.command(name='favorite_play', description='⭐ Play a song from your favorites')
 @app_commands.describe(index='Favorite number to play')
