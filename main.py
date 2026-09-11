@@ -13,6 +13,7 @@ import datetime
 import logging
 import shlex
 import shutil
+import threading
 from collections import defaultdict, deque
 from typing import Optional
 from flask import Flask, jsonify
@@ -1484,18 +1485,40 @@ def build_ffmpeg_options(info=None, guild_id=None, **overrides):
     return options
 
 
+# ============================================================
+# YouTube request protection / 429 handling
+# ============================================================
+# Render can share outbound IP ranges. YouTube may answer with HTTP 429
+# when too many extractor requests arrive in a short period.  Serialize
+# yt-dlp network work, avoid aggressive retries, and temporarily back off
+# after a confirmed 429 instead of hammering the same endpoint.
+_YOUTUBE_REQUEST_LOCK = threading.Lock()
+_YOUTUBE_RATE_LIMIT_UNTIL = 0.0
+_YOUTUBE_RATE_LIMIT_LOCK = threading.Lock()
+_YOUTUBE_RATE_LIMIT_SECONDS = float(
+    os.getenv("YOUTUBE_429_COOLDOWN", "90")
+)
+_YOUTUBE_SEARCH_CACHE = {}
+_YOUTUBE_SEARCH_CACHE_TTL = float(
+    os.getenv("YOUTUBE_SEARCH_CACHE_TTL", "120")
+)
+
+
 YDL_OPTIONS = {
     'format': 'bestaudio[ext=m4a]/bestaudio/best',
     'quiet': True,
     'noplaylist': True,
     'extract_flat': False,
     'default_search': 'ytsearch',
+    'skip_download': True,
+
+    # Use one stable client path. Multiple clients can multiply requests
+    # when YouTube is already rate-limiting the Render egress IP.
     'extractor_args': {
         'youtube': {
             'player_client': ['web_embedded'],
         },
     },
-    'skip_download': True,
 
     'user_agent': (
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -1512,46 +1535,159 @@ YDL_OPTIONS = {
         'Referer': 'https://www.youtube.com/',
     },
 
-    # Current YouTube JS challenge handling.
-    'extractor_args': {
-        'youtube': {
-            'player_client': ['default', 'web_embedded'],
-        }
-    },
-
-    # Keep EJS challenge handling enabled even if yt-dlp changes defaults.
-    # Deno is supplied dynamically by build_ydl_options().
+    # Deno + yt-dlp-ejs are supplied by build_ydl_options().
     'remote_components': ['ejs:npm'],
 
     'socket_timeout': 20,
-    'retries': 3,
-    'fragment_retries': 3,
+    # Do not aggressively retry 429s. A retry storm makes rate limiting worse.
+    'retries': 1,
+    'fragment_retries': 1,
 }
 
-def search_youtube(query):
-    with yt_dlp.YoutubeDL(build_ydl_options()) as ydl:
+
+def _youtube_is_429_error(exc):
+    """Return True when yt-dlp/HTTP error indicates YouTube rate limiting."""
+    message = str(exc).lower()
+    return (
+        "http error 429" in message
+        or "too many requests" in message
+        or "ratelimit" in message
+        or "rate limit" in message
+    )
+
+
+def _youtube_rate_limit_remaining():
+    with _YOUTUBE_RATE_LIMIT_LOCK:
+        return max(0.0, _YOUTUBE_RATE_LIMIT_UNTIL - time.monotonic())
+
+
+def _youtube_mark_rate_limited():
+    global _YOUTUBE_RATE_LIMIT_UNTIL
+    with _YOUTUBE_RATE_LIMIT_LOCK:
+        _YOUTUBE_RATE_LIMIT_UNTIL = (
+            time.monotonic() + _YOUTUBE_RATE_LIMIT_SECONDS
+        )
+
+
+def _youtube_cached_result(cache_key):
+    now = time.monotonic()
+    item = _YOUTUBE_SEARCH_CACHE.get(cache_key)
+    if not item:
+        return None
+
+    created_at, value = item
+    if now - created_at > _YOUTUBE_SEARCH_CACHE_TTL:
+        _YOUTUBE_SEARCH_CACHE.pop(cache_key, None)
+        return None
+
+    return dict(value)
+
+
+def _youtube_store_result(cache_key, value):
+    if not isinstance(value, dict) or value.get("error"):
+        return
+    _YOUTUBE_SEARCH_CACHE[cache_key] = (
+        time.monotonic(),
+        dict(value),
+    )
+
+    # Keep this small so the long-running bot cannot grow the cache forever.
+    if len(_YOUTUBE_SEARCH_CACHE) > 200:
+        oldest_key = min(
+            _YOUTUBE_SEARCH_CACHE,
+            key=lambda key: _YOUTUBE_SEARCH_CACHE[key][0],
+        )
+        _YOUTUBE_SEARCH_CACHE.pop(oldest_key, None)
+
+
+def _youtube_extract(source, *, download=False, options=None):
+    """Run one yt-dlp operation with global 429 protection."""
+    remaining = _youtube_rate_limit_remaining()
+    if remaining > 0:
+        raise RuntimeError(
+            f"YouTube is rate-limiting this server. "
+            f"Please try again in about {math.ceil(remaining)} seconds."
+        )
+
+    merged_options = dict(build_ydl_options() if options is None else options)
+    merged_options["skip_download"] = not download
+
+    # Only one YouTube extractor request at a time across all guilds.
+    with _YOUTUBE_REQUEST_LOCK:
+        remaining = _youtube_rate_limit_remaining()
+        if remaining > 0:
+            raise RuntimeError(
+                f"YouTube is rate-limiting this server. "
+                f"Please try again in about {math.ceil(remaining)} seconds."
+            )
+
         try:
-            if re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/', query):
-                info = ydl.extract_info(query, download=False)
-                if 'entries' in info:
-                    info = info['entries'][0]
-            else:
-                results = ydl.extract_info(f"ytsearch:{query}", download=False)
-                if not results or 'entries' not in results or len(results['entries']) == 0:
-                    return {'error': 'No results found'}
-                info = results['entries'][0]
-            return {
-                'id': info.get('id'),
-                'url': info['webpage_url'],
-                'title': info.get('title', 'Unknown Title'),
-                'duration': info.get('duration', 0),
-                'thumbnail': info.get('thumbnail', ''),
-                'audio_url': info['url'],
-                'channel': info.get('uploader', 'Unknown'),
-                'views': info.get('view_count', 0)
-            }
-        except Exception as e:
-            return {'error': str(e)[:200]}
+            with yt_dlp.YoutubeDL(merged_options) as ydl:
+                return ydl.extract_info(source, download=download)
+        except Exception as exc:
+            if _youtube_is_429_error(exc):
+                _youtube_mark_rate_limited()
+                print(
+                    "🛑 YouTube HTTP 429 detected. "
+                    f"Backing off for {_YOUTUBE_RATE_LIMIT_SECONDS:g}s."
+                )
+                raise RuntimeError(
+                    "YouTube is temporarily rate-limiting the Render server "
+                    f"(HTTP 429). Please try again in about "
+                    f"{math.ceil(_YOUTUBE_RATE_LIMIT_SECONDS)} seconds."
+                ) from exc
+            raise
+
+
+def search_youtube(query):
+    query = str(query or "").strip()
+    if not query:
+        return {'error': 'Please enter a search query'}
+
+    # Cache searches briefly. This is especially useful when users repeat
+    # the same song request while YouTube is rate-limiting the server.
+    cache_key = query.lower()
+    cached = _youtube_cached_result(cache_key)
+    if cached:
+        print(f"⚡ YouTube search cache HIT: {query[:80]}")
+        return cached
+
+    try:
+        if re.match(r'^https?://(www\\.)?(youtube\\.com|youtu\\.be)/', query):
+            info = _youtube_extract(query, download=False)
+            if 'entries' in info:
+                info = info['entries'][0]
+        else:
+            # One result is enough for /play and dramatically reduces the
+            # number of YouTube requests compared with ytsearch5.
+            results = _youtube_extract(
+                f"ytsearch1:{query}",
+                download=False,
+            )
+            if not results or 'entries' not in results or not results['entries']:
+                return {'error': 'No results found'}
+            info = results['entries'][0]
+
+        result = {
+            'id': info.get('id'),
+            'url': info.get('webpage_url') or query,
+            'title': info.get('title', 'Unknown Title'),
+            'duration': info.get('duration', 0),
+            'thumbnail': info.get('thumbnail', ''),
+            'audio_url': info.get('url', ''),
+            'channel': info.get('uploader', 'Unknown'),
+            'views': info.get('view_count', 0),
+        }
+
+        if not result['id'] or not result['audio_url']:
+            return {'error': 'YouTube returned an incomplete result'}
+
+        _youtube_store_result(cache_key, result)
+        return result
+
+    except Exception as e:
+        return {'error': str(e)[:240]}
+
 
 def format_time(seconds):
     if seconds is None or seconds == 0:
@@ -1677,10 +1813,10 @@ AUDIO_CACHE_MAX_FILES = int(os.getenv("AUDIO_CACHE_MAX_FILES", "150"))
 AUDIO_CACHE_MAX_AGE_DAYS = float(os.getenv("AUDIO_CACHE_MAX_AGE_DAYS", "7"))
 AUDIO_CACHE_MIN_FREE_GB = float(os.getenv("AUDIO_CACHE_MIN_FREE_GB", "1"))
 AUDIO_CACHE_TEMP_MAX_AGE = int(
-    os.getenv("AUDIO_CACHE_TEMP_MAX_AGE", "1800")
+    os.getenv("AUDIO_CACHE_TEMP_MAX_AGE", "600")
 )
 AUDIO_CACHE_CLEANUP_INTERVAL = int(
-    os.getenv("AUDIO_CACHE_CLEANUP_INTERVAL", "300")
+    os.getenv("AUDIO_CACHE_CLEANUP_INTERVAL", "600")
 )
 
 AUDIO_CACHE_MAX_AGE = AUDIO_CACHE_MAX_AGE_DAYS * 24 * 60 * 60
@@ -1997,24 +2133,24 @@ async def _prefetch_next(guild_id):
                 "continuedl": True,
             })
 
-            with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(
-                    next_song["url"],
-                    download=True,
+            info = _youtube_extract(
+                next_song["url"],
+                download=True,
+                options=options,
+            )
+
+            filepath = _find_downloaded_audio(
+                info,
+                download_dir,
+            )
+
+            if not filepath:
+                raise RuntimeError(
+                    "Prefetch audio file not found. "
+                    f"Video ID: {video_id}"
                 )
 
-                filepath = _find_downloaded_audio(
-                    info,
-                    download_dir,
-                )
-
-                if not filepath:
-                    raise RuntimeError(
-                        "Prefetch audio file not found. "
-                        f"Video ID: {video_id}"
-                    )
-
-                return filepath
+            return filepath
 
         try:
             print(
@@ -2268,24 +2404,24 @@ async def play_next(guild_id, expected_generation=None):
                 "continuedl": True,
             })
 
-            with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(
-                    song["url"],
-                    download=True,
+            info = _youtube_extract(
+                song["url"],
+                download=True,
+                options=options,
+            )
+
+            filepath = _find_downloaded_audio(
+                info,
+                download_dir,
+            )
+
+            if not filepath:
+                raise RuntimeError(
+                    "Downloaded audio file not found. "
+                    f"Video ID: {info.get('id')}"
                 )
 
-                filepath = _find_downloaded_audio(
-                    info,
-                    download_dir,
-                )
-
-                if not filepath:
-                    raise RuntimeError(
-                        "Downloaded audio file not found. "
-                        f"Video ID: {info.get('id')}"
-                    )
-
-                return info, filepath
+            return info, filepath
 
         try:
             if audio_file:
@@ -4305,6 +4441,12 @@ async def seek(interaction: discord.Interaction, seconds: int):
     base_generation = bot.playback_generation.get(guild_id, 0)
     audio_file = None
 
+    # CACHE FIRST: seeking a previously downloaded song should never hit
+    # YouTube again just to recreate the same local media file.
+    video_id = song.get("id")
+    if video_id:
+        audio_file = _get_cached_audio(guild_id, video_id)
+
     def download_seek_audio():
         options = build_ydl_options()
         options.update({
@@ -4316,20 +4458,33 @@ async def seek(interaction: discord.Interaction, seconds: int):
             "continuedl": True,
         })
 
-        with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(song["url"], download=True)
-            filepath = _find_downloaded_audio(info, download_dir)
+        info = _youtube_extract(
+            song["url"],
+            download=True,
+            options=options,
+        )
+        filepath = _find_downloaded_audio(info, download_dir)
 
-            if not filepath:
-                raise RuntimeError(
-                    "Downloaded audio file not found. "
-                    f"Video ID: {info.get('id')}"
-                )
+        if not filepath:
+            raise RuntimeError(
+                "Downloaded audio file not found. "
+                f"Video ID: {info.get('id')}"
+            )
 
-            return info, filepath
+        return info, filepath
 
     try:
-        info, audio_file = await asyncio.to_thread(download_seek_audio)
+        if audio_file:
+            print(f"⚡ Seek cache HIT: {audio_file}")
+            info = {
+                "id": video_id,
+                "title": song.get("title", "Unknown"),
+                "duration": song.get("duration", 0),
+            }
+        else:
+            info, audio_file = await asyncio.to_thread(
+                download_seek_audio
+            )
 
         async with _get_playback_lock(guild_id):
             if bot.playback_generation.get(guild_id) != base_generation:
@@ -4740,14 +4895,13 @@ async def search(interaction: discord.Interaction, query: str):
     try:
         await interaction.response.defer()
 
-        search_query = f"ytsearch5:{query}"
-
-        with yt_dlp.YoutubeDL(build_ydl_options()) as ydl:
-            results = await asyncio.to_thread(
-                ydl.extract_info,
-                search_query,
-                download=False,
-            )
+        # One result is enough for the picker and avoids 5-result bursts.
+        search_query = f"ytsearch1:{query}"
+        results = await asyncio.to_thread(
+            _youtube_extract,
+            search_query,
+            download=False,
+        )
 
         if not isinstance(results, dict):
             await interaction.followup.send(
