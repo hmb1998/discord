@@ -22,44 +22,52 @@ from storage import SQLiteStorage
 app = Flask(__name__)
 
 def _resolve_youtube_cookiefile():
-    """Resolve YOUTUBE_COOKIE_FILE to a real Netscape cookie file.
+    """Resolve the configured YouTube cookie source to a writable temp file.
 
-    It supports both an existing file path and cookie contents stored
-    directly in a Fly.io secret.
+    Render Secret Files are mounted read-only. yt-dlp may need to refresh or
+    rewrite cookie state, so never pass the read-only secret-file path directly
+    to yt-dlp. Always copy a valid cookie file to /tmp first.
     """
     value = (YOUTUBE_COOKIE_FILE or "").strip()
     if not value:
         return None
 
-    if os.path.isfile(value):
-        return value
-
-    looks_like_cookie_text = (
-        "# Netscape HTTP Cookie File" in value
-        or any(
-            line.count("\t") >= 6
-            for line in value.splitlines()
-            if line.strip()
-        )
-    )
-    if not looks_like_cookie_text:
-        return None
-
     runtime_path = "/tmp/youtube_cookies.txt"
+
     try:
+        # Case 1: Render Secret File / existing cookie file.
+        if os.path.isfile(value):
+            shutil.copyfile(value, runtime_path)
+            os.chmod(runtime_path, 0o600)
+            return runtime_path
+
+        # Case 2: cookie contents supplied directly through configuration.
+        looks_like_cookie_text = (
+            "# Netscape HTTP Cookie File" in value
+            or any(
+                line.count("\t") >= 6
+                for line in value.splitlines()
+                if line.strip()
+            )
+        )
+        if not looks_like_cookie_text:
+            return None
+
         with open(runtime_path, "w", encoding="utf-8") as cookie_file:
             cookie_file.write(value)
             if not value.endswith("\n"):
                 cookie_file.write("\n")
+
         os.chmod(runtime_path, 0o600)
         return runtime_path
+
     except OSError as exc:
-        print(f"⚠️ Could not prepare YouTube cookie file: {exc}")
+        print(f"⚠️ Could not prepare writable YouTube cookie file: {exc}")
         return None
 
 
 def _find_deno():
-    """Find a supported Deno runtime in Fly.io/container environments."""
+    """Find a supported Deno runtime in container environments."""
     candidates = [
         os.getenv("DENO_PATH"),
         shutil.which("deno"),
@@ -78,9 +86,9 @@ def _find_deno():
 
 
 def build_ydl_options(**overrides):
-    """Build robust yt-dlp options for YouTube + Fly.io.
+    """Build robust yt-dlp options for YouTube in a container.
 
-    Fly.io mounts the YOUTUBE_COOKIE_FILE secret at /app/cookies.txt.
+    The configured cookie source is copied to a writable /tmp file.
     Deno + yt-dlp-ejs are installed in the Docker image so current
     YouTube JavaScript challenges can be handled.
     """
