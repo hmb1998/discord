@@ -31,7 +31,7 @@ DB_PATH = os.getenv(
 # YouTube cookies are read from a Fly.io file secret.
 # The legacy environment-variable fallback is intentionally disabled by default
 # because very large cookie values can exceed the process argument/environment limit.
-YOUTUBE_COOKIE_FILE = "/app/cookies.txt"
+YOUTUBE_COOKIE_FILE = "/etc/secrets/cookies.txt"
 
 RICH_PRESENCE_ASSET_KEY = (
     os.getenv("ASSET_KEY")
