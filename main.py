@@ -1639,54 +1639,98 @@ def _youtube_extract(source, *, download=False, options=None):
             raise
 
 
+# Lightweight YouTube search cache to avoid repeated requests for the same query.
+_YOUTUBE_SEARCH_CACHE = {}
+_YOUTUBE_SEARCH_CACHE_TTL = 120
+_YOUTUBE_SEARCH_LOCK = threading.Lock()
+
 def search_youtube(query):
+    """Search YouTube with short timeouts, a small cache, and one request at a time."""
     query = str(query or "").strip()
     if not query:
-        return {'error': 'Please enter a search query'}
+        return {"error": "Empty search query"}
 
-    # Cache searches briefly. This is especially useful when users repeat
-    # the same song request while YouTube is rate-limiting the server.
-    cache_key = query.lower()
-    cached = _youtube_cached_result(cache_key)
-    if cached:
-        print(f"⚡ YouTube search cache HIT: {query[:80]}")
-        return cached
+    # Cache successful searches briefly so repeated /play requests do not hit YouTube.
+    now = time.time()
+    cache_key = query.casefold()
+    with _YOUTUBE_SEARCH_LOCK:
+        cached = _YOUTUBE_SEARCH_CACHE.get(cache_key)
+        if cached and now - cached[0] < _YOUTUBE_SEARCH_CACHE_TTL:
+            return dict(cached[1])
+
+    # Prevent several guilds/users from hammering YouTube simultaneously.
+    if not globals().get("_youtube_search_global_lock"):
+        globals()["_youtube_search_global_lock"] = threading.Lock()
+    search_lock = globals()["_youtube_search_global_lock"]
+
+    acquired = search_lock.acquire(timeout=2)
+    if not acquired:
+        return {"error": "YouTube is busy. Please try again in a few seconds."}
 
     try:
-        if re.match(r'^https?://(www\\.)?(youtube\\.com|youtu\\.be)/', query):
-            info = _youtube_extract(query, download=False)
-            if 'entries' in info:
-                info = info['entries'][0]
-        else:
-            # One result is enough for /play and dramatically reduces the
-            # number of YouTube requests compared with ytsearch5.
-            results = _youtube_extract(
-                f"ytsearch1:{query}",
-                download=False,
-            )
-            if not results or 'entries' not in results or not results['entries']:
-                return {'error': 'No results found'}
-            info = results['entries'][0]
+        options = build_ydl_options().copy()
+        options.update({
+            "socket_timeout": 12,
+            "retries": 1,
+            "extractor_retries": 1,
+            "fragment_retries": 1,
+            "noplaylist": True,
+            "extract_flat": False,
+            "skip_download": True,
+        })
 
-        result = {
-            'id': info.get('id'),
-            'url': info.get('webpage_url') or query,
-            'title': info.get('title', 'Unknown Title'),
-            'duration': info.get('duration', 0),
-            'thumbnail': info.get('thumbnail', ''),
-            'audio_url': info.get('url', ''),
-            'channel': info.get('uploader', 'Unknown'),
-            'views': info.get('view_count', 0),
-        }
+        with yt_dlp.YoutubeDL(options) as ydl:
+            if re.match(r"^https?://(www\.)?(youtube\.com|youtu\.be)/", query):
+                info = ydl.extract_info(query, download=False)
+                if isinstance(info, dict) and info.get("entries"):
+                    info = info["entries"][0]
+            else:
+                info = ydl.extract_info(
+                    f"ytsearch1:{query}",
+                    download=False,
+                )
+                entries = (info or {}).get("entries") or []
+                if not entries:
+                    return {"error": "No results found"}
+                info = entries[0]
 
-        if not result['id'] or not result['audio_url']:
-            return {'error': 'YouTube returned an incomplete result'}
+            if not isinstance(info, dict):
+                return {"error": "YouTube returned invalid data"}
 
-        _youtube_store_result(cache_key, result)
-        return result
+            result = {
+                "id": info.get("id"),
+                "url": info.get("webpage_url") or query,
+                "title": info.get("title", "Unknown Title"),
+                "duration": info.get("duration", 0),
+                "thumbnail": info.get("thumbnail", ""),
+                "audio_url": info.get("url"),
+                "channel": info.get("uploader", "Unknown"),
+                "views": info.get("view_count", 0),
+            }
 
-    except Exception as e:
-        return {'error': str(e)[:240]}
+            with _YOUTUBE_SEARCH_LOCK:
+                _YOUTUBE_SEARCH_CACHE[cache_key] = (time.time(), result)
+
+            return result
+
+    except Exception as exc:
+        message = str(exc)
+        lowered = message.lower()
+
+        if "429" in message or "too many requests" in lowered:
+            return {
+                "error": "YouTube is temporarily rate-limiting this server. Please try again later."
+            }
+
+        if "timed out" in lowered or "timeout" in lowered:
+            return {
+                "error": "YouTube search timed out. Please try again in a few seconds."
+            }
+
+        return {"error": message[:200]}
+
+    finally:
+        search_lock.release()
 
 
 def format_time(seconds):
